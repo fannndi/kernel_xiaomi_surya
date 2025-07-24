@@ -78,13 +78,19 @@ jobs:
         run: |
           if [[ "$ANDROID_VER" == "A10" ]]; then
             CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android13-release/clang-r416183b.tar.gz"
+            CLANG_URL_ALT="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-13.0.0_r0.90/clang-r416183b.tar.gz"
           else
             CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android15-release/clang-r522817.tar.gz"
+            CLANG_URL_ALT="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-15.0.0_r0.30/clang-r522817.tar.gz"
           fi
-          if [[ ! -f "clang/bin/clang" ]]; then
-            mkdir -p clang
-            wget -q $CLANG_URL -O - | tar -xz -C clang
+
+          mkdir -p clang
+          echo "Downloading Clang..."
+          if ! wget -q "$CLANG_URL" -O - | tar -xz -C clang; then
+            echo "Primary URL failed, trying alternate..."
+            wget -q "$CLANG_URL_ALT" -O - | tar -xz -C clang
           fi
+
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
           echo "TOOLCHAIN_PATH=$GITHUB_WORKSPACE/clang" >> $GITHUB_ENV
 
