@@ -76,25 +76,15 @@ jobs:
 
       - name: Select & Download Clang
         run: |
-          if [[ "$ANDROID_VER" == "A10" ]]; then
-            CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android13-release/clang-r416183b.tar.gz"
-            CLANG_URL_ALT="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-13.0.0_r0.90/clang-r416183b.tar.gz"
-          else
-            CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android15-release/clang-r522817.tar.gz"
-            CLANG_URL_ALT="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-15.0.0_r0.30/clang-r522817.tar.gz"
-          fi
-
           mkdir -p clang
-          echo "Downloading Clang..."
-          if ! wget -q "$CLANG_URL" -O clang.tar; then
-            echo "Primary URL failed, trying alternate..."
-            wget -q "$CLANG_URL_ALT" -O clang.tar || (echo "❌ All Clang URLs failed!" && exit 1)
+          if [[ "$ANDROID_VER" == "A10" ]]; then
+            echo "Downloading Clang r383902 (Android 11)..."
+            wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android11-release/clang-r383902.tar.gz -O - | tar -xz -C clang
+          else
+            echo "Downloading Clang r536225 (Android 15)..."
+            wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r536225.tar.gz -O - | tar -xz -C clang
           fi
-
-          # Extract tanpa -z karena +archive bukan gzip murni
-          tar -xf clang.tar -C clang || (echo "❌ Failed to extract Clang" && exit 1)
-          rm -f clang.tar
-
+          echo "Clang installed at $GITHUB_WORKSPACE/clang"
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
           echo "TOOLCHAIN_PATH=$GITHUB_WORKSPACE/clang" >> $GITHUB_ENV
 
