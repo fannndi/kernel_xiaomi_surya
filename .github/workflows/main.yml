@@ -110,8 +110,9 @@ jobs:
             CROSS_COMPILE=aarch64-linux-android- \
             CROSS_COMPILE_ARM32=arm-linux-androideabi- \
             CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
             ${{ github.event.inputs.defconfig }}
-          make O=out ARCH=arm64 SUBARCH=arm64 CC=clang olddefconfig
+          make O=out ARCH=arm64 SUBARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig
 
       - name: Disable Debug Options
         if: ${{ env.DISABLE_DEBUG == 'true' }}
@@ -147,6 +148,7 @@ jobs:
           nice -n10 make O=out \
             ARCH=arm64 SUBARCH=arm64 \
             CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
             LD=ld.lld \
             AR=llvm-ar \
             NM=llvm-nm \
