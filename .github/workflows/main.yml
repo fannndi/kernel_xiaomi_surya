@@ -86,10 +86,13 @@ jobs:
 
           mkdir -p clang
           echo "Downloading Clang..."
-          if ! wget -q "$CLANG_URL" -O - | tar -x -C clang; then
+          if ! wget -q "$CLANG_URL" -O clang.tar; then
             echo "Primary URL failed, trying alternate..."
-            wget -q "$CLANG_URL_ALT" -O - | tar -x -C clang
+            wget -q "$CLANG_URL_ALT" -O clang.tar
           fi
+
+          tar -xf clang.tar -C clang
+          rm -f clang.tar
 
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
           echo "TOOLCHAIN_PATH=$GITHUB_WORKSPACE/clang" >> $GITHUB_ENV
