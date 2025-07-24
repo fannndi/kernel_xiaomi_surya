@@ -1,4 +1,4 @@
-name: Kernel Build (Hybrid Alt)
+name: Kernel Build (A10)
 
 on:
   workflow_dispatch:
@@ -11,28 +11,18 @@ on:
         description: "Defconfig"
         required: true
         default: "surya_defconfig"
-      android_version:
-        description: "Clang & GCC Version (A10/A13/A15)"
-        required: true
-        default: "A10"
-      enable_experimental:
-        description: "Enable Experimental Features"
-        required: false
-        default: "false"
-      disable_debug:
-        description: "Disable Debug Configs"
-        required: false
-        default: "false"
 
 env:
   BUILD_USER: fannndi
   BUILD_HOST: github
   ARCH: arm64
   SUBARCH: arm64
+  CLANG_URL: https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android11-release/clang-r383902.tar.gz
+  GCC32_REPO: https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git
 
 jobs:
   build:
-    name: Compile Kernel
+    name: Compile Kernel (A10)
     runs-on: ubuntu-latest
 
     steps:
@@ -49,9 +39,6 @@ jobs:
           echo "BUILD_ID=$BUILD_ID" >> $GITHUB_ENV
           echo "ZIPNAME=$ZIPNAME" >> $GITHUB_ENV
           echo "BUILD_START=$(date +%s)" >> $GITHUB_ENV
-          echo "ANDROID_VER=${{ github.event.inputs.android_version }}" >> $GITHUB_ENV
-          echo "DISABLE_DEBUG=${{ github.event.inputs.disable_debug }}" >> $GITHUB_ENV
-          echo "ENABLE_EXPERIMENTAL=${{ github.event.inputs.enable_experimental }}" >> $GITHUB_ENV
           echo "COMMIT_HASH=$(git log --pretty=format:'%h - %s' -1)" >> $GITHUB_ENV
 
       - name: Create Swap
@@ -65,7 +52,7 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y --no-install-recommends \
-            clang llvm \
+            clang llvm gcc-9 g++-9 \
             abootimg android-sdk-libsparse-utils bc binutils bison build-essential \
             ccache cmake cpio curl device-tree-compiler flex gettext git jq kmod \
             libelf-dev libfdt-dev liblz4-tool libncurses5-dev libncursesw5-dev \
@@ -73,34 +60,39 @@ jobs:
             lzop make ninja-build openssl patchutils pigz protobuf-compiler \
             python-is-python3 python3 python3-mako python3-pip python3-virtualenv \
             rsync unzip wget xz-utils zip zstd
+          echo "max_size = 2G" > ~/.ccache/ccache.conf
 
-      - name: Select & Download Clang
+      - name: Cache Clang
+        id: cache-clang
+        uses: actions/cache@v4
+        with:
+          path: clang
+          key: clang-r383902
+
+      - name: Download Clang (r383902)
+        if: steps.cache-clang.outputs.cache-hit != 'true'
         run: |
           mkdir -p clang
-          if [[ "$ANDROID_VER" == "A10" ]]; then
-            echo "Downloading Clang r383902 (Android 11)..."
-            wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android11-release/clang-r383902.tar.gz -O - | tar -xz -C clang
-          elif [[ "$ANDROID_VER" == "A13" ]]; then
-            echo "Downloading Clang r450784 (Android 13)..."
-            wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android13-release/clang-r450784d.tar.gz -O - | tar -xz -C clang
-          else
-            echo "Downloading Clang r536225 (Android 15)..."
-            wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r536225.tar.gz -O - | tar -xz -C clang
-          fi
-          echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
-          echo "TOOLCHAIN_PATH=$GITHUB_WORKSPACE/clang" >> $GITHUB_ENV
+          wget -q $CLANG_URL -O - | tar -xz -C clang
 
-      - name: Show Clang Version
-        run: clang/bin/clang --version
+      - name: Cache GCC32
+        id: cache-gcc32
+        uses: actions/cache@v4
+        with:
+          path: gcc32
+          key: gcc32-lineage-17.1
 
-      - name: Download GCC Toolchains (32-bit Only)
+      - name: Download GCC Toolchain (32-bit)
+        if: steps.cache-gcc32.outputs.cache-hit != 'true'
         run: |
-          GCC_32_DIR=gcc32
-          if [[ ! -d "${GCC_32_DIR}" ]]; then
-            echo "Cloning GCC 32-bit..."
-            git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git "${GCC_32_DIR}" || exit 1
-          fi
-          echo "$GITHUB_WORKSPACE/${GCC_32_DIR}/bin" >> $GITHUB_PATH
+          git clone --depth=1 -b lineage-17.1 $GCC32_REPO gcc32
+
+      - name: Prepare Toolchain Path
+        run: |
+          echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
+          echo "$GITHUB_WORKSPACE/gcc32/bin" >> $GITHUB_PATH
+          clang/bin/clang --version
+          arm-linux-androideabi-gcc --version || true
 
       - name: Clean Output Directory
         run: rm -rf out dtb.img Image.gz-dtb AnyKernel3 *.zip log.txt || true
@@ -109,55 +101,29 @@ jobs:
         run: |
           export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH"
           make O=out ARCH=arm64 SUBARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-androideabi- \
             CC=clang HOSTCC=clang HOSTCXX=clang++ \
             CLANG_TRIPLE=aarch64-linux-gnu- \
-            LD=ld.lld HOSTLD=ld.lld \
+            LD=ld.lld \
             AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             LLVM=1 LLVM_IAS=1 \
-            LDFLAGS_vdso="-fuse-ld=lld" \
             ${{ github.event.inputs.defconfig }}
 
-      - name: Patch Kernel Config (Debug & Experimental)
-        run: |
-          chmod +x scripts/config
-          if [[ "$ANDROID_VER" == "A10" ]]; then
-            scripts/config --file out/.config --disable LTO || true
-            scripts/config --file out/.config --disable THINLTO || true
-          fi
-          if [[ "${DISABLE_DEBUG}" == "true" ]]; then
-            scripts/config --file out/.config --disable DEBUG_INFO || true
-          fi
-          if [[ "${ENABLE_EXPERIMENTAL}" == "true" ]]; then
-            scripts/config --file out/.config --enable DEBUG_FS || true
-          fi
-          make O=out ARCH=arm64 SUBARCH=arm64 olddefconfig
-
-      - name: Compile Kernel
+      - name: Compile Kernel (A10)
         run: |
           export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH"
-          export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-androideabi-
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export KBUILD_COMPILER_STRING="$($GITHUB_WORKSPACE/clang/bin/clang --version | head -n1)"
           export KBUILD_BUILD_USER="${BUILD_USER}"
           export KBUILD_BUILD_HOST="${BUILD_HOST}"
           unset AS
+          export LD=ld.lld
+          CORES=$(nproc)
+          TOTAL_MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+          if [ "$TOTAL_MEM_KB" -lt 7000000 ]; then JOBS=2; else JOBS=$(( CORES > 2 ? CORES - 1 : 2 )); fi
+          export MAKEFLAGS="-j$JOBS -Oline"
 
-          # Linker rules
-          if [[ "$ANDROID_VER" == "A10" ]]; then
-            export LD=ld.bfd
-            export HOSTLD=ld.bfd
-          else
-            export LD=ld.lld
-            export HOSTLD=ld.lld
-          fi
-
-          JOBS=$(nproc --all)
-          export MAKEFLAGS="-j$(( JOBS > 2 ? JOBS-1 : 2 )) -Oline"
-
-          set -o pipefail
           nice -n10 make O=out \
             ARCH=arm64 SUBARCH=arm64 \
             CC=clang \
@@ -213,6 +179,7 @@ jobs:
           echo "🕒 Duration: $(( $(date +%s) - BUILD_START ))s"
           du -sh "${{ env.ZIPNAME }}" || true
           sha1sum "${{ env.ZIPNAME }}" || true
+          echo "🔧 Compiler: $($GITHUB_WORKSPACE/clang/bin/clang --version | head -n1)"
 
       - name: Disable Swap
         if: always()
