@@ -26,7 +26,6 @@
 #include "srcpos.h"
 
 #define YYLTYPE_IS_DECLARED 1
-#define YYLTYPE_IS_TRIVIAL 1
 typedef struct YYLTYPE {
   int first_line;
   int first_column;
