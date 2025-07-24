@@ -54,7 +54,7 @@ jobs:
           sudo apt install -y --no-install-recommends \
             clang llvm gcc-9 g++-9 \
             abootimg android-sdk-libsparse-utils bc binutils bison build-essential \
-            ccache cmake cpio curl device-tree-compiler flex gettext git jq kmod \
+            cmake cpio curl device-tree-compiler flex gettext git jq kmod \
             libelf-dev libfdt-dev liblz4-tool libncurses5-dev libncursesw5-dev \
             libssl-dev libudev-dev libxml2-utils libzstd-dev lsb-release lz4 \
             lzop make ninja-build openssl patchutils pigz protobuf-compiler \
@@ -86,7 +86,8 @@ jobs:
             CROSS_COMPILE=aarch64-linux-android- \
             CROSS_COMPILE_ARM32=arm-linux-androideabi- \
             CC=clang HOSTCC=clang HOSTCXX=clang++ \
-            LD=$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android-ld.bfd \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            LD=aarch64-linux-android-ld.bfd \
             AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             LLVM=1 LLVM_IAS=1 \
             ${{ github.event.inputs.defconfig }}
@@ -101,13 +102,14 @@ jobs:
           export KBUILD_BUILD_USER="${BUILD_USER}"
           export KBUILD_BUILD_HOST="${BUILD_HOST}"
           unset AS
-          export LD=$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android-ld.bfd
+          export LD=aarch64-linux-android-ld.bfd
           JOBS=$(nproc --all)
           export MAKEFLAGS="-j$(( JOBS > 2 ? JOBS-1 : 2 )) -Oline"
 
           nice -n10 make O=out \
             ARCH=arm64 SUBARCH=arm64 \
             CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
             HOSTCC=clang HOSTCXX=clang++ \
             AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             LLVM=1 LLVM_IAS=1 \
@@ -124,7 +126,7 @@ jobs:
       - name: Check Kernel Outputs
         run: |
           ls -lh out/arch/arm64/boot/ || true
-          test -f out/arch/arm64/boot/Image.gz-dtb || (echo "Image.gz-dtb missing!" && exit 1)
+          test -s out/arch/arm64/boot/Image.gz-dtb || (echo "Image.gz-dtb missing or empty!" && exit 1)
 
       - name: Create Kernel Images
         run: |
