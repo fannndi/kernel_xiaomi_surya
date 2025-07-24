@@ -69,11 +69,11 @@ jobs:
             python-is-python3 python3 python3-mako python3-pip python3-virtualenv \
             rsync unzip wget xz-utils zip zstd
 
-      - name: Download Clang r450784d (Android 13)
+      - name: Download Clang r383902 (Android 11)
         run: |
           if [[ ! -f "clang/bin/clang" ]]; then
             mkdir -p clang
-            wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android13-release/clang-r450784d.tar.gz -O - | tar -xz -C clang
+            wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android11-release/clang-r383902.tar.gz -O - | tar -xz -C clang
           fi
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
           echo "TOOLCHAIN_PATH=$GITHUB_WORKSPACE/clang" >> $GITHUB_ENV
@@ -82,17 +82,17 @@ jobs:
         id: clang_version
         run: echo "version=$(clang/bin/clang --version | head -n1)" >> $GITHUB_OUTPUT
 
-      - name: Download GCC 4.9 Toolchains (lineage-19.1)
+      - name: Download GCC 4.9 Toolchains (lineage-17.1)
         run: |
           GCC_64_DIR=gcc64
           GCC_32_DIR=gcc32
           if ! [ -d "${GCC_64_DIR}" ]; then
-              echo "GCC 64 not found! Cloning..."
-              git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git "${GCC_64_DIR}" || exit 1
+              echo "Cloning GCC 64 (17.1)..."
+              git clone --depth=1 -b lineage-17.1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git "${GCC_64_DIR}" || exit 1
           fi
           if ! [ -d "${GCC_32_DIR}" ]; then
-              echo "GCC 32 not found! Cloning..."
-              git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git "${GCC_32_DIR}" || exit 1
+              echo "Cloning GCC 32 (17.1)..."
+              git clone --depth=1 -b lineage-17.1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git "${GCC_32_DIR}" || exit 1
           fi
           echo "$GITHUB_WORKSPACE/${GCC_64_DIR}/bin" >> $GITHUB_PATH
           echo "$GITHUB_WORKSPACE/${GCC_32_DIR}/bin" >> $GITHUB_PATH
