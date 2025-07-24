@@ -6,7 +6,7 @@ on:
       kernel_name:
         description: "Kernel Name"
         required: true
-        default: "MIUI-A10-LOS"
+        default: "MIUI-A10"
       defconfig:
         description: "Defconfig"
         required: true
@@ -72,11 +72,11 @@ jobs:
             python-is-python3 python3 python3-mako python3-pip python3-virtualenv \
             rsync unzip wget xz-utils zip zstd
 
-      - name: Download Clang Android 15
+      - name: Download Clang
         run: |
           if [[ ! -f "clang/bin/clang" ]]; then
             mkdir -p clang
-            wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r536225.tar.gz -O - | tar -xz -C clang
+            wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android11-release/clang-r383902.tar.gz -O - | tar -xz -C clang
           fi
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
           echo "TOOLCHAIN_PATH=$GITHUB_WORKSPACE/clang" >> $GITHUB_ENV
@@ -108,12 +108,6 @@ jobs:
             ${{ github.event.inputs.defconfig }}
           make O=out ARCH=arm64 SUBARCH=arm64 CC=clang olddefconfig
 
-      - name: Disable Stack Protector Strong (Fix clang error)
-        run: |
-          chmod +x scripts/config
-          scripts/config --file out/.config --disable CC_STACKPROTECTOR_STRONG
-          make O=out ARCH=arm64 SUBARCH=arm64 olddefconfig
-
       - name: Disable Debug Options
         if: ${{ env.DISABLE_DEBUG == 'true' }}
         run: |
@@ -127,13 +121,6 @@ jobs:
           chmod +x scripts/config
           scripts/config --file out/.config --enable DEBUG_FS
           make O=out ARCH=arm64 SUBARCH=arm64 olddefconfig
-
-      - name: Patch DTC yylloc Conflict
-        run: |
-          echo 'HOSTCFLAGS_dtc-parser.tab.o += -DYYLTYPE_IS_DECLARED=1' >> scripts/dtc/Makefile
-          cd scripts/dtc
-          rm -f dtc-lexer.lex.c
-          flex -o dtc-lexer.lex.c dtc-lexer.l
 
       - name: Compile Kernel
         run: |
@@ -168,7 +155,9 @@ jobs:
             STRIP=llvm-strip \
             LLVM=1 LLVM_IAS=1 \
             KCFLAGS="-Wno-error" \
-            KBUILD_VERBOSE=2 V=1 \
+            KBUILD_VERBOSE=2 \
+            KBUILD_DEBUG=1 \
+            V=2 \
             Image.gz-dtb 2>&1 | tee log.txt
 
           echo "✅ Kernel Build Completed at $(date)"

@@ -34,11 +34,20 @@ COMMENT		"/*"([^*]|\*+[^*/])*\*+"/"
 LINECOMMENT	"//".*\n
 
 %{
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
+#include <ctype.h>
+#include <errno.h>
+#include <stdarg.h>
+#include <assert.h>
+
 #include "dtc.h"
 #include "srcpos.h"
 #include "dtc-parser.tab.h"
 
-YYLTYPE yylloc;
+extern YYLTYPE yylloc;
 extern bool treesource_error;
 
 /* CAUTION: this will stop working if we ever use yyless() or yyunput() */
@@ -76,84 +85,70 @@ static void PRINTF(1, 2) lexical_error(const char *fmt, ...);
 <*>^"#"(line)?[ \t]+[0-9]+[ \t]+{STRING}([ \t]+[0-9]+)? {
 			char *line, *fnstart, *fnend;
 			struct data fn;
-			/* skip text before line # */
 			line = yytext;
 			while (!isdigit((unsigned char)*line))
 				line++;
-
-			/* regexp ensures that first and list "
-			 * in the whole yytext are those at
-			 * beginning and end of the filename string */
 			fnstart = memchr(yytext, '"', yyleng);
-			for (fnend = yytext + yyleng - 1;
-			     *fnend != '"'; fnend--)
-				;
+			for (fnend = yytext + yyleng - 1; *fnend != '"'; fnend--);
 			assert(fnstart && fnend && (fnend > fnstart));
-
-			fn = data_copy_escape_string(fnstart + 1,
-						     fnend - fnstart - 1);
-
-			/* Don't allow nuls in filenames */
+			fn = data_copy_escape_string(fnstart + 1, fnend - fnstart - 1);
 			if (memchr(fn.val, '\0', fn.len - 1))
 				lexical_error("nul in line number directive");
-
-			/* -1 since #line is the number of the next line */
 			srcpos_set_line(xstrdup(fn.val), atoi(line) - 1);
 			data_free(fn);
 		}
 
-<*><<EOF>>		{
+<*><<EOF>> {
 			if (!pop_input_file()) {
 				yyterminate();
 			}
 		}
 
-<*>{STRING}	{
+<*>{STRING} {
 			DPRINT("String: %s\n", yytext);
-			yylval.data = data_copy_escape_string(yytext+1,
-					yyleng-2);
+			yylval.data = data_copy_escape_string(yytext+1, yyleng-2);
 			return DT_STRING;
 		}
 
-<*>"/dts-v1/"	{
+<*>"/dts-v1/" {
 			DPRINT("Keyword: /dts-v1/\n");
 			dts_version = 1;
 			BEGIN_DEFAULT();
 			return DT_V1;
 		}
 
-<*>"/plugin/"	{
+<*>"/plugin/" {
 			DPRINT("Keyword: /plugin/\n");
 			return DT_PLUGIN;
 		}
 
-<*>"/memreserve/"	{
+<*>"/memreserve/" {
 			DPRINT("Keyword: /memreserve/\n");
 			BEGIN_DEFAULT();
 			return DT_MEMRESERVE;
 		}
 
-<*>"/bits/"	{
+<*>"/bits/" {
 			DPRINT("Keyword: /bits/\n");
 			BEGIN_DEFAULT();
 			return DT_BITS;
 		}
 
-<*>"/delete-property/"	{
+<*>"/delete-property/" {
 			DPRINT("Keyword: /delete-property/\n");
 			DPRINT("<PROPNODENAME>\n");
 			BEGIN(PROPNODENAME);
 			return DT_DEL_PROP;
 		}
 
-<*>"/delete-node/"	{
+<*>"/delete-node/" {
 			DPRINT("Keyword: /delete-node/\n");
 			DPRINT("<PROPNODENAME>\n");
 			BEGIN(PROPNODENAME);
 			return DT_DEL_NODE;
 		}
 
-<*>{LABEL}:	{
+<*>{LABEL}: {
 			DPRINT("Label: %s\n", yytext);
 			yylval.labelref = xstrdup(yytext);
 			yylval.labelref[yyleng-1] = '\0';
@@ -163,53 +158,41 @@ static void PRINTF(1, 2) lexical_error(const char *fmt, ...);
 <V1>([0-9]+|0[xX][0-9a-fA-F]+)(U|L|UL|LL|ULL)? {
 			char *e;
 			DPRINT("Integer Literal: '%s'\n", yytext);
-
 			errno = 0;
 			yylval.integer = strtoull(yytext, &e, 0);
-
 			if (*e && e[strspn(e, "UL")]) {
-				lexical_error("Bad integer literal '%s'",
-					      yytext);
+				lexical_error("Bad integer literal '%s'", yytext);
 			}
-
 			if (errno == ERANGE)
-				lexical_error("Integer literal '%s' out of range",
-					      yytext);
+				lexical_error("Integer literal '%s' out of range", yytext);
 			else
-				/* ERANGE is the only strtoull error triggerable
-				 *  by strings matching the pattern */
 				assert(errno == 0);
 			return DT_LITERAL;
 		}
 
-<*>{CHAR_LITERAL}	{
+<*>{CHAR_LITERAL} {
 			struct data d;
 			DPRINT("Character literal: %s\n", yytext);
-
 			d = data_copy_escape_string(yytext+1, yyleng-2);
 			if (d.len == 1) {
 				lexical_error("Empty character literal");
 				yylval.integer = 0;
 			} else {
 				yylval.integer = (unsigned char)d.val[0];
-
 				if (d.len > 2)
-					lexical_error("Character literal has %d"
-						      " characters instead of 1",
-						      d.len - 1);
+					lexical_error("Character literal has %d characters instead of 1", d.len - 1);
 			}
-
 			data_free(d);
 			return DT_CHAR_LITERAL;
 		}
 
-<*>\&{LABEL}	{	/* label reference */
+<*>\&{LABEL} {
 			DPRINT("Ref: %s\n", yytext+1);
 			yylval.labelref = xstrdup(yytext+1);
 			return DT_REF;
 		}
 
-<*>"&{/"{PATHCHAR}*\}	{	/* new-style path reference */
+<*>"&{/"{PATHCHAR}*\} {
 			yytext[yyleng-1] = '\0';
 			DPRINT("Ref: %s\n", yytext+2);
 			yylval.labelref = xstrdup(yytext+2);
@@ -222,7 +205,7 @@ static void PRINTF(1, 2) lexical_error(const char *fmt, ...);
 			return DT_BYTE;
 		}
 
-<BYTESTRING>"]"	{
+<BYTESTRING>"]" {
 			DPRINT("/BYTESTRING\n");
 			BEGIN_DEFAULT();
 			return ']';
@@ -230,39 +213,36 @@ static void PRINTF(1, 2) lexical_error(const char *fmt, ...);
 
 <PROPNODENAME>\\?{PROPNODECHAR}+ {
 			DPRINT("PropNodeName: %s\n", yytext);
-			yylval.propnodename = xstrdup((yytext[0] == '\\') ?
-							yytext + 1 : yytext);
+			yylval.propnodename = xstrdup((yytext[0] == '\\') ? yytext + 1 : yytext);
 			BEGIN_DEFAULT();
 			return DT_PROPNODENAME;
 		}
 
-"/incbin/"	{
+"/incbin/" {
 			DPRINT("Binary Include\n");
 			return DT_INCBIN;
 		}
 
-<*>{WS}+	/* eat whitespace */
-<*>{COMMENT}+	/* eat C-style comments */
+<*>{WS}+ /* eat whitespace */
+<*>{COMMENT}+ /* eat C-style comments */
 <*>{LINECOMMENT}+ /* eat C++-style comments */
 
-<*>"<<"		{ return DT_LSHIFT; };
-<*>">>"		{ return DT_RSHIFT; };
-<*>"<="		{ return DT_LE; };
-<*>">="		{ return DT_GE; };
-<*>"=="		{ return DT_EQ; };
-<*>"!="		{ return DT_NE; };
-<*>"&&"		{ return DT_AND; };
-<*>"||"		{ return DT_OR; };
+<*>"<<" { return DT_LSHIFT; };
+<*>">>" { return DT_RSHIFT; };
+<*><=" { return DT_LE; };
+<*>">=" { return DT_GE; };
+<*>"==" { return DT_EQ; };
+<*>"!=" { return DT_NE; };
+<*>"&&" { return DT_AND; };
+<*>"||" { return DT_OR; };
 
-<*>.		{
-			DPRINT("Char: %c (\\x%02x)\n", yytext[0],
-				(unsigned)yytext[0]);
+<*>. {
+			DPRINT("Char: %c (\\x%02x)\n", yytext[0], (unsigned)yytext[0]);
 			if (yytext[0] == '[') {
 				DPRINT("<BYTESTRING>\n");
 				BEGIN(BYTESTRING);
 			}
-			if ((yytext[0] == '{')
-			    || (yytext[0] == ';')) {
+			if ((yytext[0] == '{') || (yytext[0] == ';')) {
 				DPRINT("<PROPNODENAME>\n");
 				BEGIN(PROPNODENAME);
 			}
@@ -274,33 +254,26 @@ static void PRINTF(1, 2) lexical_error(const char *fmt, ...);
 static void push_input_file(const char *filename)
 {
 	assert(filename);
-
 	srcfile_push(filename);
-
 	yyin = current_srcfile->f;
-
 	yypush_buffer_state(yy_create_buffer(yyin, YY_BUF_SIZE));
 }
-
 
 static bool pop_input_file(void)
 {
 	if (srcfile_pop() == 0)
 		return false;
-
 	yypop_buffer_state();
 	yyin = current_srcfile->f;
-
 	return true;
 }
 
 static void lexical_error(const char *fmt, ...)
 {
 	va_list ap;
-
 	va_start(ap, fmt);
 	srcpos_verror(&yylloc, "Lexical error", fmt, ap);
 	va_end(ap);
 
-	treesource_error = true;
+treesource_error = true;
 }
