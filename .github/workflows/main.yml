@@ -18,7 +18,7 @@ env:
   ARCH: arm64
   SUBARCH: arm64
   CLANG_URL: https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android13-release/clang-r450784d.tar.gz
-  NDK_URL: https://dl.google.com/android/repository/android-ndk-r22b-linux-x86_64.zip
+  NDK_URL: https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip
 
 jobs:
   build:
@@ -72,13 +72,13 @@ jobs:
           wget -q $CLANG_URL -O - | tar -xz -C clang
           wget -q $NDK_URL -O ndk.zip
           unzip -q ndk.zip
-          mv android-ndk-r22b ndk
+          mv android-ndk-r21e ndk
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
           echo "$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
           echo "$GITHUB_WORKSPACE/ndk/toolchains/aarch64-linux-android-4.9/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
           echo "$GITHUB_WORKSPACE/ndk/toolchains/arm-linux-androideabi-4.9/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
           clang/bin/clang --version
-          $GITHUB_WORKSPACE/ndk/toolchains/aarch64-linux-android-4.9/prebuilt/linux-x86_64/bin/aarch64-linux-android-ld.bfd --version
+          ndk/toolchains/aarch64-linux-android-4.9/prebuilt/linux-x86_64/bin/aarch64-linux-android-ld.bfd --version
 
       - name: Clean Output Directory
         run: rm -rf out dtb.img Image.gz-dtb AnyKernel3 *.zip log.txt || true
