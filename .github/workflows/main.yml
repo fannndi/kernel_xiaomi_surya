@@ -1,4 +1,4 @@
-name: Kernel Build (Hybrid)
+name: Kernel Build (Hybrid Alt)
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ on:
         required: true
         default: "surya_defconfig"
       android_version:
-        description: "Clang & GCC Version (A10/A13)"
+        description: "Clang & GCC Version (A10/A13/A15)"
         required: true
         default: "A10"
       enable_experimental:
@@ -65,7 +65,7 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y --no-install-recommends \
-            clang llvm gcc-9 g++-9 \
+            clang llvm \
             abootimg android-sdk-libsparse-utils bc binutils bison build-essential \
             ccache cmake cpio curl device-tree-compiler flex gettext git jq kmod \
             libelf-dev libfdt-dev liblz4-tool libncurses5-dev libncursesw5-dev \
@@ -80,36 +80,26 @@ jobs:
           if [[ "$ANDROID_VER" == "A10" ]]; then
             echo "Downloading Clang r383902 (Android 11)..."
             wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android11-release/clang-r383902.tar.gz -O - | tar -xz -C clang
+          elif [[ "$ANDROID_VER" == "A13" ]]; then
+            echo "Downloading Clang r450784 (Android 13)..."
+            wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android13-release/clang-r450784d.tar.gz -O - | tar -xz -C clang
           else
             echo "Downloading Clang r536225 (Android 15)..."
             wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r536225.tar.gz -O - | tar -xz -C clang
           fi
-          echo "Clang installed at $GITHUB_WORKSPACE/clang"
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
           echo "TOOLCHAIN_PATH=$GITHUB_WORKSPACE/clang" >> $GITHUB_ENV
 
       - name: Show Clang Version
-        id: clang_version
-        run: echo "version=$(clang/bin/clang --version | head -n1)" >> $GITHUB_OUTPUT
+        run: clang/bin/clang --version
 
-      - name: Download GCC Toolchains
+      - name: Download GCC Toolchains (32-bit Only)
         run: |
-          GCC_64_DIR=gcc64
           GCC_32_DIR=gcc32
-          if [[ "$ANDROID_VER" == "A10" ]]; then
-            GCC_BRANCH="lineage-17.1"
-          else
-            GCC_BRANCH="lineage-19.1"
+          if [[ ! -d "${GCC_32_DIR}" ]]; then
+            echo "Cloning GCC 32-bit..."
+            git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git "${GCC_32_DIR}" || exit 1
           fi
-          if ! [ -d "${GCC_64_DIR}" ]; then
-              echo "GCC 64 not found! Cloning..."
-              git clone --depth=1 -b ${GCC_BRANCH} https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git "${GCC_64_DIR}" || exit 1
-          fi
-          if ! [ -d "${GCC_32_DIR}" ]; then
-              echo "GCC 32 not found! Cloning..."
-              git clone --depth=1 -b ${GCC_BRANCH} https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git "${GCC_32_DIR}" || exit 1
-          fi
-          echo "$GITHUB_WORKSPACE/${GCC_64_DIR}/bin" >> $GITHUB_PATH
           echo "$GITHUB_WORKSPACE/${GCC_32_DIR}/bin" >> $GITHUB_PATH
 
       - name: Clean Output Directory
@@ -117,9 +107,9 @@ jobs:
 
       - name: Make Defconfig
         run: |
-          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH"
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH"
           make O=out ARCH=arm64 SUBARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-android- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-androideabi- \
             CC=clang HOSTCC=clang HOSTCXX=clang++ \
             CLANG_TRIPLE=aarch64-linux-gnu- \
@@ -129,21 +119,11 @@ jobs:
             LDFLAGS_vdso="-fuse-ld=lld" \
             ${{ github.event.inputs.defconfig }}
 
-          make O=out ARCH=arm64 SUBARCH=arm64 \
-            CC=clang HOSTCC=clang HOSTCXX=clang++ \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            LD=ld.lld HOSTLD=ld.lld \
-            AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
-            LLVM=1 LLVM_IAS=1 \
-            LDFLAGS_vdso="-fuse-ld=lld" \
-            olddefconfig
-
       - name: Patch Kernel Config (Debug & Experimental)
         run: |
           chmod +x scripts/config
           if [[ "$ANDROID_VER" == "A10" ]]; then
             scripts/config --file out/.config --disable LTO || true
-            scripts/config --file out/.config --disable LTO_CLANG || true
             scripts/config --file out/.config --disable THINLTO || true
           fi
           if [[ "${DISABLE_DEBUG}" == "true" ]]; then
@@ -156,23 +136,26 @@ jobs:
 
       - name: Compile Kernel
         run: |
-          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH"
-          export CROSS_COMPILE=aarch64-linux-android-
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-androideabi-
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export KBUILD_COMPILER_STRING="$($GITHUB_WORKSPACE/clang/bin/clang --version | head -n1)"
           export KBUILD_BUILD_USER="${BUILD_USER}"
           export KBUILD_BUILD_HOST="${BUILD_HOST}"
           unset AS
+
+          # Linker rules
           if [[ "$ANDROID_VER" == "A10" ]]; then
-            export LD=$GITHUB_WORKSPACE/gcc64/bin/aarch64-linux-android-ld.bfd
+            export LD=ld.bfd
+            export HOSTLD=ld.bfd
           else
             export LD=ld.lld
+            export HOSTLD=ld.lld
           fi
-          CORES=$(nproc)
-          TOTAL_MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-          if [ "$TOTAL_MEM_KB" -lt 7000000 ]; then JOBS=2; else JOBS=$(( CORES > 2 ? CORES - 1 : 2 )); fi
-          export MAKEFLAGS="-j$JOBS -Oline"
+
+          JOBS=$(nproc --all)
+          export MAKEFLAGS="-j$(( JOBS > 2 ? JOBS-1 : 2 )) -Oline"
 
           set -o pipefail
           nice -n10 make O=out \
@@ -184,11 +167,10 @@ jobs:
             LLVM=1 LLVM_IAS=1 \
             KCFLAGS="-Wno-error" \
             KBUILD_VERBOSE=2 \
-            V=2 \
             Image.gz-dtb 2>&1 | tee log.txt
 
           if [ ${PIPESTATUS[0]} -ne 0 ]; then
-            echo "❌ Kernel build failed. Showing last 50 lines:"
+            echo "❌ Kernel build failed. Last 50 lines:"
             tail -n 50 log.txt
             exit 1
           fi
