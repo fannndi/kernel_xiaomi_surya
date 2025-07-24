@@ -88,10 +88,11 @@ jobs:
           echo "Downloading Clang..."
           if ! wget -q "$CLANG_URL" -O clang.tar; then
             echo "Primary URL failed, trying alternate..."
-            wget -q "$CLANG_URL_ALT" -O clang.tar
+            wget -q "$CLANG_URL_ALT" -O clang.tar || (echo "❌ All Clang URLs failed!" && exit 1)
           fi
 
-          tar -xf clang.tar -C clang
+          # Extract tanpa -z karena +archive bukan gzip murni
+          tar -xf clang.tar -C clang || (echo "❌ Failed to extract Clang" && exit 1)
           rm -f clang.tar
 
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
