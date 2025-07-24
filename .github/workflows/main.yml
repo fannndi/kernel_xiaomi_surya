@@ -107,7 +107,6 @@ jobs:
             CROSS_COMPILE=aarch64-linux-android- \
             CROSS_COMPILE_ARM32=arm-linux-androideabi- \
             CC=clang HOSTCC=clang HOSTCXX=clang++ \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
             LD=ld.lld HOSTLD=ld.lld \
             AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             LLVM=1 LLVM_IAS=1 \
@@ -116,7 +115,6 @@ jobs:
 
           make O=out ARCH=arm64 SUBARCH=arm64 \
             CC=clang HOSTCC=clang HOSTCXX=clang++ \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
             LD=ld.lld HOSTLD=ld.lld \
             AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             LLVM=1 LLVM_IAS=1 \
@@ -142,19 +140,19 @@ jobs:
           export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH"
           export CROSS_COMPILE=aarch64-linux-android-
           export CROSS_COMPILE_ARM32=arm-linux-androideabi-
-          export CLANG_TRIPLE=aarch64-linux-gnu-
           export KBUILD_COMPILER_STRING="$($GITHUB_WORKSPACE/clang/bin/clang --version | head -n1)"
           export KBUILD_BUILD_USER="${BUILD_USER}"
           export KBUILD_BUILD_HOST="${BUILD_HOST}"
           unset AS
+          export LD=ld.lld
           JOBS=$(nproc)
           export MAKEFLAGS="-j$JOBS -Oline"
 
           nice -n10 make O=out \
             ARCH=arm64 SUBARCH=arm64 \
-            CC=clang HOSTCC=clang HOSTCXX=clang++ \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            LD=ld.lld HOSTLD=ld.lld \
+            CC=clang \
+            HOSTCC=clang HOSTCXX=clang++ HOSTLD=ld.lld HOSTLDFLAGS="-m64 -fuse-ld=lld" \
+            LD=ld.lld \
             AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             LLVM=1 LLVM_IAS=1 \
             LDFLAGS_vdso="-fuse-ld=lld" \
