@@ -82,12 +82,13 @@ jobs:
       - name: Make Defconfig
         run: |
           export PATH="$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH"
+          export LD=$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android-ld.bfd
+          export AS=clang
           make O=out ARCH=arm64 SUBARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-android- \
             CROSS_COMPILE_ARM32=arm-linux-androideabi- \
             CC=clang HOSTCC=clang HOSTCXX=clang++ \
             CLANG_TRIPLE=aarch64-linux-gnu- \
-            LD=aarch64-linux-android-ld.bfd \
             AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             LLVM=1 LLVM_IAS=1 \
             ${{ github.event.inputs.defconfig }}
@@ -101,12 +102,12 @@ jobs:
           export KBUILD_COMPILER_STRING="$($GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/clang --version | head -n1)"
           export KBUILD_BUILD_USER="${BUILD_USER}"
           export KBUILD_BUILD_HOST="${BUILD_HOST}"
-          unset AS
-          export LD=aarch64-linux-android-ld.bfd
+          export AS=clang
+          export LD=$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android-ld.bfd
           JOBS=$(nproc --all)
           export MAKEFLAGS="-j$(( JOBS > 2 ? JOBS-1 : 2 )) -Oline"
 
-          nice -n10 make O=out \
+          if ! nice -n10 make O=out \
             ARCH=arm64 SUBARCH=arm64 \
             CC=clang \
             CLANG_TRIPLE=aarch64-linux-gnu- \
@@ -115,9 +116,7 @@ jobs:
             LLVM=1 LLVM_IAS=1 \
             KCFLAGS="-Wno-error" \
             KBUILD_VERBOSE=2 \
-            Image.gz-dtb 2>&1 | tee log.txt
-
-          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            Image.gz-dtb 2>&1 | tee log.txt; then
             echo "❌ Kernel build failed. Last 50 lines:"
             tail -n 50 log.txt
             exit 1
