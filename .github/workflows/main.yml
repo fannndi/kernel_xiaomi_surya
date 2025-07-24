@@ -1,4 +1,4 @@
-name: Kernel Build (A10 - NDK r27d)
+name: Kernel Build (A10 - Full LLVM + LD.bfd)
 
 on:
   workflow_dispatch:
@@ -18,7 +18,6 @@ env:
   ARCH: arm64
   SUBARCH: arm64
   NDK_VERSION: r27d
-  GCC32_REPO: https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git
 
 jobs:
   build:
@@ -29,9 +28,8 @@ jobs:
       - name: Checkout Kernel Source
         uses: actions/checkout@v3
 
-      - name: Set Timezone & Vars
+      - name: Set Vars
         run: |
-          sudo ln -sf /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
           BUILD_TIME=$(date '+%d%m%Y-%H%M')
           BUILD_ID=$(date '+%Y%m%d%H%M%S')
           ZIPNAME="${{ github.event.inputs.kernel_name }}-Surya-${BUILD_TIME}.zip"
@@ -39,7 +37,6 @@ jobs:
           echo "BUILD_ID=$BUILD_ID" >> $GITHUB_ENV
           echo "ZIPNAME=$ZIPNAME" >> $GITHUB_ENV
           echo "BUILD_START=$(date +%s)" >> $GITHUB_ENV
-          echo "COMMIT_HASH=$(git log --pretty=format:'%h - %s' -1)" >> $GITHUB_ENV
 
       - name: Create Swap
         run: |
@@ -52,13 +49,11 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y --no-install-recommends \
-            clang llvm gcc-9 g++-9 \
-            abootimg android-sdk-libsparse-utils bc binutils bison build-essential \
-            cmake cpio curl device-tree-compiler flex gettext git jq kmod \
-            libelf-dev libfdt-dev liblz4-tool libncurses5-dev libncursesw5-dev \
-            libssl-dev libudev-dev libxml2-utils libzstd-dev lsb-release lz4 \
-            lzop make ninja-build openssl patchutils pigz protobuf-compiler \
-            python-is-python3 python3 python3-mako python3-pip python3-virtualenv \
+            clang llvm \
+            abootimg bc binutils bison build-essential \
+            cpio curl device-tree-compiler flex git kmod \
+            libelf-dev libfdt-dev liblz4-tool libncurses5-dev \
+            libssl-dev lz4 lzop make openssl patchutils pigz \
             rsync unzip wget xz-utils zip zstd
 
       - name: Download Android NDK r27d
@@ -69,71 +64,46 @@ jobs:
           echo "$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
           ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/clang --version
 
-      - name: Download GCC Toolchain (32-bit)
-        run: |
-          if ! [ -d "gcc32" ]; then
-            git clone --depth=1 -b lineage-17.1 $GCC32_REPO gcc32
-          fi
-          echo "$GITHUB_WORKSPACE/gcc32/bin" >> $GITHUB_PATH
-
       - name: Clean Output Directory
         run: rm -rf out dtb.img Image.gz-dtb AnyKernel3 *.zip log.txt || true
 
       - name: Make Defconfig
         run: |
-          export PATH="$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH"
-          export LD=$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android-ld.bfd
-          make O=out ARCH=arm64 SUBARCH=arm64 \
+          export PATH="$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+          export LD=aarch64-linux-android-ld.bfd
+          make O=out ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-android- \
-            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
-            CC=clang HOSTCC=gcc-9 HOSTCXX=g++-9 \
+            CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
             AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             LLVM=1 LLVM_IAS=1 \
             ${{ github.event.inputs.defconfig }}
 
-      - name: Compile Kernel (A10)
+      - name: Compile Kernel
         run: |
-          export PATH="$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH"
-          export CROSS_COMPILE=aarch64-linux-android-
-          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
-          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export PATH="$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
           export KBUILD_COMPILER_STRING="$($GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/clang --version | head -n1)"
           export KBUILD_BUILD_USER="${BUILD_USER}"
           export KBUILD_BUILD_HOST="${BUILD_HOST}"
-          export LD=$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android-ld.bfd
+          export LD=aarch64-linux-android-ld.bfd
           JOBS=$(nproc --all)
           export MAKEFLAGS="-j$(( JOBS > 2 ? JOBS-1 : 2 )) -Oline"
 
           nice -n10 make O=out \
-            ARCH=arm64 SUBARCH=arm64 \
+            ARCH=arm64 \
             CC=clang \
-            HOSTCC=gcc-9 HOSTCXX=g++-9 \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            LD=aarch64-linux-android-ld.bfd \
             AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             LLVM=1 LLVM_IAS=1 \
-            KCFLAGS="-Wno-error" \
-            KBUILD_VERBOSE=2 \
             Image.gz-dtb 2>&1 | tee log.txt
 
-          if [ ${PIPESTATUS[0]} -ne 0 ]; then
-            echo "❌ Kernel build failed. Last 50 lines:"
-            tail -n 50 log.txt
-            exit 1
-          fi
-
-      - name: Check Kernel Outputs
-        run: |
-          ls -lh out/arch/arm64/boot/ || true
-          test -s out/arch/arm64/boot/Image.gz-dtb || (echo "Image.gz-dtb missing or empty!" && exit 1)
-
-      - name: Create Kernel Images
-        run: |
-          cat out/arch/arm64/boot/Image.gz out/arch/arm64/boot/dts/**/*.dtb > Image.gz-dtb
-          find out/arch/arm64/boot/dts -name '*.dtb' | sort | xargs cat > dtb.img || true
+          [ ${PIPESTATUS[0]} -eq 0 ] || { tail -n 50 log.txt; exit 1; }
 
       - name: Package with AnyKernel3
         run: |
           git clone --depth=1 https://github.com/rinnsakaguchi/AnyKernel3 -b FSociety
-          cp Image.gz-dtb dtb.img AnyKernel3/ 2>/dev/null || true
+          cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
           cd AnyKernel3 && zip -r9 ../${{ env.ZIPNAME }} . -x '*.git*' README.md *placeholder
 
       - name: Upload Artifacts
