@@ -86,9 +86,9 @@ jobs:
 
           mkdir -p clang
           echo "Downloading Clang..."
-          if ! wget -q "$CLANG_URL" -O - | tar -xz -C clang; then
+          if ! wget -q "$CLANG_URL" -O - | tar -x -C clang; then
             echo "Primary URL failed, trying alternate..."
-            wget -q "$CLANG_URL_ALT" -O - | tar -xz -C clang
+            wget -q "$CLANG_URL_ALT" -O - | tar -x -C clang
           fi
 
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
