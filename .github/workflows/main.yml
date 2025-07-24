@@ -11,6 +11,10 @@ on:
         description: "Defconfig"
         required: true
         default: "surya_defconfig"
+      android_version:
+        description: "Clang & GCC Version (A10/A13)"
+        required: true
+        default: "A10"
       enable_experimental:
         description: "Enable Experimental Features"
         required: false
@@ -45,6 +49,7 @@ jobs:
           echo "BUILD_ID=$BUILD_ID" >> $GITHUB_ENV
           echo "ZIPNAME=$ZIPNAME" >> $GITHUB_ENV
           echo "BUILD_START=$(date +%s)" >> $GITHUB_ENV
+          echo "ANDROID_VER=${{ github.event.inputs.android_version }}" >> $GITHUB_ENV
           echo "DISABLE_DEBUG=${{ github.event.inputs.disable_debug }}" >> $GITHUB_ENV
           echo "ENABLE_EXPERIMENTAL=${{ github.event.inputs.enable_experimental }}" >> $GITHUB_ENV
           echo "COMMIT_HASH=$(git log --pretty=format:'%h - %s' -1)" >> $GITHUB_ENV
@@ -65,15 +70,20 @@ jobs:
             ccache cmake cpio curl device-tree-compiler flex gettext git jq kmod \
             libelf-dev libfdt-dev liblz4-tool libncurses5-dev libncursesw5-dev \
             libssl-dev libudev-dev libxml2-utils libzstd-dev lsb-release lz4 \
-            lzop make nano ninja-build openssl patchutils pigz protobuf-compiler \
+            lzop make ninja-build openssl patchutils pigz protobuf-compiler \
             python-is-python3 python3 python3-mako python3-pip python3-virtualenv \
             rsync unzip wget xz-utils zip zstd
 
-      - name: Download Clang r383902 (Android 11)
+      - name: Select & Download Clang
         run: |
+          if [[ "$ANDROID_VER" == "A10" ]]; then
+            CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android13-release/clang-r416183b.tar.gz"
+          else
+            CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android15-release/clang-r522817.tar.gz"
+          fi
           if [[ ! -f "clang/bin/clang" ]]; then
             mkdir -p clang
-            wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android11-release/clang-r383902.tar.gz -O - | tar -xz -C clang
+            wget -q $CLANG_URL -O - | tar -xz -C clang
           fi
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
           echo "TOOLCHAIN_PATH=$GITHUB_WORKSPACE/clang" >> $GITHUB_ENV
@@ -82,17 +92,22 @@ jobs:
         id: clang_version
         run: echo "version=$(clang/bin/clang --version | head -n1)" >> $GITHUB_OUTPUT
 
-      - name: Download GCC 4.9 Toolchains (lineage-17.1)
+      - name: Download GCC Toolchains
         run: |
           GCC_64_DIR=gcc64
           GCC_32_DIR=gcc32
+          if [[ "$ANDROID_VER" == "A10" ]]; then
+            GCC_BRANCH="lineage-17.1"
+          else
+            GCC_BRANCH="lineage-19.1"
+          fi
           if ! [ -d "${GCC_64_DIR}" ]; then
-              echo "Cloning GCC 64 (17.1)..."
-              git clone --depth=1 -b lineage-17.1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git "${GCC_64_DIR}" || exit 1
+              echo "GCC 64 not found! Cloning..."
+              git clone --depth=1 -b ${GCC_BRANCH} https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git "${GCC_64_DIR}" || exit 1
           fi
           if ! [ -d "${GCC_32_DIR}" ]; then
-              echo "Cloning GCC 32 (17.1)..."
-              git clone --depth=1 -b lineage-17.1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git "${GCC_32_DIR}" || exit 1
+              echo "GCC 32 not found! Cloning..."
+              git clone --depth=1 -b ${GCC_BRANCH} https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git "${GCC_32_DIR}" || exit 1
           fi
           echo "$GITHUB_WORKSPACE/${GCC_64_DIR}/bin" >> $GITHUB_PATH
           echo "$GITHUB_WORKSPACE/${GCC_32_DIR}/bin" >> $GITHUB_PATH
@@ -123,18 +138,20 @@ jobs:
             LDFLAGS_vdso="-fuse-ld=lld" \
             olddefconfig
 
-      - name: Disable Debug Options
-        if: ${{ env.DISABLE_DEBUG == 'true' }}
+      - name: Patch Kernel Config (Debug & Experimental)
         run: |
           chmod +x scripts/config
-          scripts/config --file out/.config --disable DEBUG_INFO
-          make O=out ARCH=arm64 SUBARCH=arm64 olddefconfig
-
-      - name: Enable Experimental Options
-        if: ${{ env.ENABLE_EXPERIMENTAL == 'true' }}
-        run: |
-          chmod +x scripts/config
-          scripts/config --file out/.config --enable DEBUG_FS
+          if [[ "$ANDROID_VER" == "A10" ]]; then
+            scripts/config --file out/.config --disable LTO || true
+            scripts/config --file out/.config --disable LTO_CLANG || true
+            scripts/config --file out/.config --disable THINLTO || true
+          fi
+          if [[ "${DISABLE_DEBUG}" == "true" ]]; then
+            scripts/config --file out/.config --disable DEBUG_INFO || true
+          fi
+          if [[ "${ENABLE_EXPERIMENTAL}" == "true" ]]; then
+            scripts/config --file out/.config --enable DEBUG_FS || true
+          fi
           make O=out ARCH=arm64 SUBARCH=arm64 olddefconfig
 
       - name: Compile Kernel
@@ -147,13 +164,15 @@ jobs:
           export KBUILD_BUILD_USER="${BUILD_USER}"
           export KBUILD_BUILD_HOST="${BUILD_HOST}"
           unset AS
-          # Pakai ld.bfd dari GCC agar aman
-          export LD=$GITHUB_WORKSPACE/gcc64/bin/aarch64-linux-android-ld.bfd
-          JOBS=2
+          if [[ "$ANDROID_VER" == "A10" ]]; then
+            export LD=$GITHUB_WORKSPACE/gcc64/bin/aarch64-linux-android-ld.bfd
+          else
+            export LD=ld.lld
+          fi
+          CORES=$(nproc)
+          TOTAL_MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+          if [ "$TOTAL_MEM_KB" -lt 7000000 ]; then JOBS=2; else JOBS=$(( CORES > 2 ? CORES - 1 : 2 )); fi
           export MAKEFLAGS="-j$JOBS -Oline"
-
-          echo "🔧 Compiler: $KBUILD_COMPILER_STRING"
-          echo "🔨 Parallel Jobs: $JOBS"
 
           set -o pipefail
           nice -n10 make O=out \
@@ -177,7 +196,7 @@ jobs:
       - name: Check Kernel Outputs
         run: |
           ls -lh out/arch/arm64/boot/ || true
-          find out/arch/arm64/boot -type f || true
+          test -f out/arch/arm64/boot/Image.gz-dtb || (echo "Image.gz-dtb missing!" && exit 1)
 
       - name: Save Final .config Snapshot
         run: cp out/.config defconfig_snapshot.config
@@ -193,7 +212,7 @@ jobs:
           cp Image.gz-dtb dtb.img AnyKernel3/ 2>/dev/null || true
           cd AnyKernel3 && zip -r9 ../${{ env.ZIPNAME }} . -x '*.git*' README.md *placeholder
 
-      - name: Upload Artifacts (success or fail)
+      - name: Upload Artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
