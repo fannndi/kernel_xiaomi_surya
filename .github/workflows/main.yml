@@ -23,9 +23,6 @@ on:
 env:
   BUILD_USER: fannndi
   BUILD_HOST: github
-  HOSTCC: gcc-9
-  HOSTCXX: g++-9
-  CLANG_TRIPLE: aarch64-linux-gnu-
   ARCH: arm64
   SUBARCH: arm64
 
@@ -63,7 +60,7 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y --no-install-recommends \
-            clang llvm gcc-9 g++-9 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            clang llvm gcc-9 g++-9 \
             abootimg android-sdk-libsparse-utils bc binutils bison build-essential \
             ccache cmake cpio curl device-tree-compiler flex gettext git jq kmod \
             libelf-dev libfdt-dev liblz4-tool libncurses5-dev libncursesw5-dev \
@@ -72,11 +69,11 @@ jobs:
             python-is-python3 python3 python3-mako python3-pip python3-virtualenv \
             rsync unzip wget xz-utils zip zstd
 
-      - name: Download Clang
+      - name: Download Clang r450784d (Android 13)
         run: |
           if [[ ! -f "clang/bin/clang" ]]; then
             mkdir -p clang
-            wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android11-release/clang-r383902.tar.gz -O - | tar -xz -C clang
+            wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android13-release/clang-r450784d.tar.gz -O - | tar -xz -C clang
           fi
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
           echo "TOOLCHAIN_PATH=$GITHUB_WORKSPACE/clang" >> $GITHUB_ENV
@@ -85,24 +82,32 @@ jobs:
         id: clang_version
         run: echo "version=$(clang/bin/clang --version | head -n1)" >> $GITHUB_OUTPUT
 
-      - name: Download GCC 9.3 Toolchain (aarch64)
+      - name: Download GCC 4.9 Toolchains (lineage-19.1)
         run: |
-          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-gnu-9.3 gcc9
-          echo "$GITHUB_WORKSPACE/gcc9/bin" >> $GITHUB_PATH
+          GCC_64_DIR=gcc64
+          GCC_32_DIR=gcc32
 
-      - name: Download GCC 4.9 Toolchain (arm-linux)
-        run: |
-          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9 gcc32
-          echo "$GITHUB_WORKSPACE/gcc32/bin" >> $GITHUB_PATH
+          if ! [ -d "${GCC_64_DIR}" ]; then
+              echo "GCC 64 not found! Cloning..."
+              git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git "${GCC_64_DIR}" || exit 1
+          fi
+
+          if ! [ -d "${GCC_32_DIR}" ]; then
+              echo "GCC 32 not found! Cloning..."
+              git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git "${GCC_32_DIR}" || exit 1
+          fi
+
+          echo "$GITHUB_WORKSPACE/${GCC_64_DIR}/bin" >> $GITHUB_PATH
+          echo "$GITHUB_WORKSPACE/${GCC_32_DIR}/bin" >> $GITHUB_PATH
 
       - name: Clean Output Directory
         run: rm -rf out dtb.img Image.gz-dtb AnyKernel3 *.zip log.txt || true
 
       - name: Make Defconfig
         run: |
-          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc9/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH"
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH"
           make O=out ARCH=arm64 SUBARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-android- \
             CROSS_COMPILE_ARM32=arm-linux-androideabi- \
             CC=clang \
             ${{ github.event.inputs.defconfig }}
@@ -124,26 +129,21 @@ jobs:
 
       - name: Compile Kernel
         run: |
-          # Set PATH ke toolchain
-          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc9/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH"
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH"
 
-          # Export toolchain & metadata
-          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE=aarch64-linux-android-
           export CROSS_COMPILE_ARM32=arm-linux-androideabi-
           export KBUILD_COMPILER_STRING="$($GITHUB_WORKSPACE/clang/bin/clang --version | head -n1)"
           export KBUILD_BUILD_USER="${BUILD_USER}"
           export KBUILD_BUILD_HOST="${BUILD_HOST}"
           unset AS
 
-          # CPU core & parallelism
-          JOBS=$(nproc --ignore=1)
+          JOBS=$(nproc)
           export MAKEFLAGS="-j$JOBS -Oline"
 
-          # Logging
           echo "🔧 Using Clang: $KBUILD_COMPILER_STRING"
           echo "🧱 Starting Kernel Build at $(date)"
 
-          # Compile kernel
           nice -n10 make O=out \
             ARCH=arm64 SUBARCH=arm64 \
             CC=clang \
@@ -162,6 +162,11 @@ jobs:
 
           echo "✅ Kernel Build Completed at $(date)"
 
+      - name: Check Kernel Outputs
+        run: |
+          ls -lh out/arch/arm64/boot/ || true
+          find out/arch/arm64/boot -type f || true
+
       - name: Save Final .config Snapshot
         run: cp out/.config defconfig_snapshot.config
 
@@ -176,7 +181,8 @@ jobs:
           cp Image.gz-dtb dtb.img AnyKernel3/ 2>/dev/null || true
           cd AnyKernel3 && zip -r9 ../${{ env.ZIPNAME }} . -x '*.git*' README.md *placeholder
 
-      - name: Upload Artifacts
+      - name: Upload Artifacts (success or fail)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-${{ env.BUILD_ID }}
@@ -185,14 +191,15 @@ jobs:
             out/.config
             defconfig_snapshot.config
             ${{ env.ZIPNAME }}
+          if-no-files-found: warn
 
       - name: Show Final Info
         if: success()
         run: |
           echo "✅ Build Finished!"
-          echo "🕒 Duration: $(( $(date +%s) - ${{ env.BUILD_START }} ))s"
-          du -sh "${{ env.ZIPNAME }}"
-          sha1sum "${{ env.ZIPNAME }}"
+          echo "🕒 Duration: $(( $(date +%s) - BUILD_START ))s"
+          du -sh "${{ env.ZIPNAME }}" || true
+          sha1sum "${{ env.ZIPNAME }}" || true
 
       - name: Disable Swap
         if: always()
