@@ -18,6 +18,7 @@ env:
   ARCH: arm64
   SUBARCH: arm64
   CLANG_URL: https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android11-release/clang-r383902.tar.gz
+  GCC64_REPO: https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git
   GCC32_REPO: https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git
 
 jobs:
@@ -29,9 +30,8 @@ jobs:
       - name: Checkout Kernel Source
         uses: actions/checkout@v3
 
-      - name: Set Timezone & Vars
+      - name: Set Vars
         run: |
-          sudo ln -sf /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
           BUILD_TIME=$(date '+%d%m%Y-%H%M')
           BUILD_ID=$(date '+%Y%m%d%H%M%S')
           ZIPNAME="${{ github.event.inputs.kernel_name }}-Surya-${BUILD_TIME}.zip"
@@ -39,11 +39,10 @@ jobs:
           echo "BUILD_ID=$BUILD_ID" >> $GITHUB_ENV
           echo "ZIPNAME=$ZIPNAME" >> $GITHUB_ENV
           echo "BUILD_START=$(date +%s)" >> $GITHUB_ENV
-          echo "COMMIT_HASH=$(git log --pretty=format:'%h - %s' -1)" >> $GITHUB_ENV
 
       - name: Create Swap
         run: |
-          sudo fallocate -l 4G /swapfile
+          sudo fallocate -l 3G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
@@ -53,111 +52,60 @@ jobs:
           sudo apt update
           sudo apt install -y --no-install-recommends \
             clang llvm gcc-9 g++-9 \
-            abootimg android-sdk-libsparse-utils bc binutils bison build-essential \
-            ccache cmake cpio curl device-tree-compiler flex gettext git jq kmod \
-            libelf-dev libfdt-dev liblz4-tool libncurses5-dev libncursesw5-dev \
-            libssl-dev libudev-dev libxml2-utils libzstd-dev lsb-release lz4 \
-            lzop make ninja-build openssl patchutils pigz protobuf-compiler \
-            python-is-python3 python3 python3-mako python3-pip python3-virtualenv \
+            abootimg bc binutils bison build-essential \
+            cpio curl device-tree-compiler flex git kmod \
+            libelf-dev libfdt-dev liblz4-tool libncurses5-dev \
+            libssl-dev lz4 lzop make openssl patchutils pigz \
             rsync unzip wget xz-utils zip zstd
-          echo "max_size = 2G" > ~/.ccache/ccache.conf
 
-      - name: Cache Clang
-        id: cache-clang
-        uses: actions/cache@v4
-        with:
-          path: clang
-          key: clang-r383902
-
-      - name: Download Clang (r383902)
-        if: steps.cache-clang.outputs.cache-hit != 'true'
+      - name: Download Toolchains
         run: |
           mkdir -p clang
           wget -q $CLANG_URL -O - | tar -xz -C clang
-
-      - name: Cache GCC32
-        id: cache-gcc32
-        uses: actions/cache@v4
-        with:
-          path: gcc32
-          key: gcc32-lineage-17.1
-
-      - name: Download GCC Toolchain (32-bit)
-        if: steps.cache-gcc32.outputs.cache-hit != 'true'
-        run: |
+          git clone --depth=1 -b lineage-17.1 $GCC64_REPO gcc64
           git clone --depth=1 -b lineage-17.1 $GCC32_REPO gcc32
-
-      - name: Prepare Toolchain Path
-        run: |
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
+          echo "$GITHUB_WORKSPACE/gcc64/bin" >> $GITHUB_PATH
           echo "$GITHUB_WORKSPACE/gcc32/bin" >> $GITHUB_PATH
           clang/bin/clang --version
-          arm-linux-androideabi-gcc --version || true
 
       - name: Clean Output Directory
         run: rm -rf out dtb.img Image.gz-dtb AnyKernel3 *.zip log.txt || true
 
       - name: Make Defconfig
         run: |
-          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH"
-          make O=out ARCH=arm64 SUBARCH=arm64 \
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH"
+          make O=out ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-android- \
             CROSS_COMPILE_ARM32=arm-linux-androideabi- \
             CC=clang HOSTCC=clang HOSTCXX=clang++ \
             CLANG_TRIPLE=aarch64-linux-gnu- \
-            LD=ld.lld \
-            AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
+            LD=$GITHUB_WORKSPACE/gcc64/bin/aarch64-linux-android-ld.bfd \
             LLVM=1 LLVM_IAS=1 \
             ${{ github.event.inputs.defconfig }}
 
-      - name: Compile Kernel (A10)
+      - name: Compile Kernel
         run: |
-          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH"
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH"
+          export CROSS_COMPILE=aarch64-linux-android-
           export CROSS_COMPILE_ARM32=arm-linux-androideabi-
           export CLANG_TRIPLE=aarch64-linux-gnu-
-          export KBUILD_COMPILER_STRING="$($GITHUB_WORKSPACE/clang/bin/clang --version | head -n1)"
-          export KBUILD_BUILD_USER="${BUILD_USER}"
-          export KBUILD_BUILD_HOST="${BUILD_HOST}"
-          unset AS
-          export LD=ld.lld
-          CORES=$(nproc)
-          TOTAL_MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-          if [ "$TOTAL_MEM_KB" -lt 7000000 ]; then JOBS=2; else JOBS=$(( CORES > 2 ? CORES - 1 : 2 )); fi
-          export MAKEFLAGS="-j$JOBS -Oline"
+          export LD=$GITHUB_WORKSPACE/gcc64/bin/aarch64-linux-android-ld.bfd
+          JOBS=$(nproc --all)
+          export MAKEFLAGS="-j$(( JOBS > 2 ? JOBS-1 : 2 )) -Oline"
 
-          nice -n10 make O=out \
-            ARCH=arm64 SUBARCH=arm64 \
+          make O=out \
+            ARCH=arm64 \
             CC=clang \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
             HOSTCC=clang HOSTCXX=clang++ \
-            AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             LLVM=1 LLVM_IAS=1 \
-            KCFLAGS="-Wno-error" \
-            KBUILD_VERBOSE=2 \
             Image.gz-dtb 2>&1 | tee log.txt
-
-          if [ ${PIPESTATUS[0]} -ne 0 ]; then
-            echo "❌ Kernel build failed. Last 50 lines:"
-            tail -n 50 log.txt
-            exit 1
-          fi
-
-      - name: Check Kernel Outputs
-        run: |
-          ls -lh out/arch/arm64/boot/ || true
-          test -f out/arch/arm64/boot/Image.gz-dtb || (echo "Image.gz-dtb missing!" && exit 1)
-
-      - name: Save Final .config Snapshot
-        run: cp out/.config defconfig_snapshot.config
-
-      - name: Create Kernel Images
-        run: |
-          cat out/arch/arm64/boot/Image.gz out/arch/arm64/boot/dts/**/*.dtb > Image.gz-dtb
-          find out/arch/arm64/boot/dts -name '*.dtb' | sort | xargs cat > dtb.img || true
+          [ ${PIPESTATUS[0]} -eq 0 ] || { tail -n 50 log.txt; exit 1; }
 
       - name: Package with AnyKernel3
         run: |
           git clone --depth=1 https://github.com/rinnsakaguchi/AnyKernel3 -b FSociety
-          cp Image.gz-dtb dtb.img AnyKernel3/ 2>/dev/null || true
+          cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
           cd AnyKernel3 && zip -r9 ../${{ env.ZIPNAME }} . -x '*.git*' README.md *placeholder
 
       - name: Upload Artifacts
@@ -168,18 +116,8 @@ jobs:
           path: |
             log.txt
             out/.config
-            defconfig_snapshot.config
             ${{ env.ZIPNAME }}
           if-no-files-found: warn
-
-      - name: Show Final Info
-        if: success()
-        run: |
-          echo "✅ Build Finished!"
-          echo "🕒 Duration: $(( $(date +%s) - BUILD_START ))s"
-          du -sh "${{ env.ZIPNAME }}" || true
-          sha1sum "${{ env.ZIPNAME }}" || true
-          echo "🔧 Compiler: $($GITHUB_WORKSPACE/clang/bin/clang --version | head -n1)"
 
       - name: Disable Swap
         if: always()
