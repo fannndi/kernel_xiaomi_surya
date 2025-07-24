@@ -86,17 +86,14 @@ jobs:
         run: |
           GCC_64_DIR=gcc64
           GCC_32_DIR=gcc32
-
           if ! [ -d "${GCC_64_DIR}" ]; then
               echo "GCC 64 not found! Cloning..."
               git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git "${GCC_64_DIR}" || exit 1
           fi
-
           if ! [ -d "${GCC_32_DIR}" ]; then
               echo "GCC 32 not found! Cloning..."
               git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git "${GCC_32_DIR}" || exit 1
           fi
-
           echo "$GITHUB_WORKSPACE/${GCC_64_DIR}/bin" >> $GITHUB_PATH
           echo "$GITHUB_WORKSPACE/${GCC_32_DIR}/bin" >> $GITHUB_PATH
 
@@ -111,8 +108,9 @@ jobs:
             CROSS_COMPILE_ARM32=arm-linux-androideabi- \
             CC=clang \
             CLANG_TRIPLE=aarch64-linux-gnu- \
+            LD=ld.lld \
             ${{ github.event.inputs.defconfig }}
-          make O=out ARCH=arm64 SUBARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig
+          make O=out ARCH=arm64 SUBARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- LD=ld.lld olddefconfig
 
       - name: Disable Debug Options
         if: ${{ env.DISABLE_DEBUG == 'true' }}
@@ -131,14 +129,13 @@ jobs:
       - name: Compile Kernel
         run: |
           export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH"
-
           export CROSS_COMPILE=aarch64-linux-android-
           export CROSS_COMPILE_ARM32=arm-linux-androideabi-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
           export KBUILD_COMPILER_STRING="$($GITHUB_WORKSPACE/clang/bin/clang --version | head -n1)"
           export KBUILD_BUILD_USER="${BUILD_USER}"
           export KBUILD_BUILD_HOST="${BUILD_HOST}"
           unset AS
-
           JOBS=$(nproc)
           export MAKEFLAGS="-j$JOBS -Oline"
 
