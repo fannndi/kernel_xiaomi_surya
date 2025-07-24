@@ -107,11 +107,14 @@ jobs:
             CROSS_COMPILE=aarch64-linux-android- \
             CROSS_COMPILE_ARM32=arm-linux-androideabi- \
             CC=clang \
-            LD=ld.lld \
-            HOSTLD=ld.lld \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            LD=ld.lld HOSTLD=ld.lld \
             LLVM=1 LLVM_IAS=1 \
             ${{ github.event.inputs.defconfig }}
-          make O=out ARCH=arm64 SUBARCH=arm64 CC=clang LD=ld.lld HOSTLD=ld.lld LLVM=1 LLVM_IAS=1 olddefconfig
+          make O=out ARCH=arm64 SUBARCH=arm64 \
+            CC=clang CLANG_TRIPLE=aarch64-linux-gnu- \
+            LD=ld.lld HOSTLD=ld.lld \
+            LLVM=1 LLVM_IAS=1 olddefconfig
 
       - name: Disable Debug Options
         if: ${{ env.DISABLE_DEBUG == 'true' }}
@@ -139,22 +142,17 @@ jobs:
           JOBS=$(nproc)
           export MAKEFLAGS="-j$JOBS -Oline"
 
-          echo "🔧 Using Clang: $KBUILD_COMPILER_STRING"
-          echo "🧱 Starting Kernel Build at $(date)"
-
           nice -n10 make O=out \
             ARCH=arm64 SUBARCH=arm64 \
             CC=clang \
-            LD=ld.lld \
-            HOSTLD=ld.lld \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            LD=ld.lld HOSTLD=ld.lld \
             AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             LLVM=1 LLVM_IAS=1 \
             KCFLAGS="-Wno-error" \
             KBUILD_VERBOSE=2 \
             V=2 \
             Image.gz-dtb 2>&1 | tee log.txt
-
-          echo "✅ Kernel Build Completed at $(date)"
 
       - name: Check Kernel Outputs
         run: |
