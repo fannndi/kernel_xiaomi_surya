@@ -29,7 +29,6 @@ jobs:
       - name: Checkout Kernel Source
         uses: actions/checkout@v3
 
-      # Cache Clang & NDK untuk mempercepat build berikutnya
       - name: Cache Toolchains
         uses: actions/cache@v4
         with:
@@ -76,15 +75,17 @@ jobs:
           mv android-ndk-r22b ndk
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
           echo "$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+          echo "$GITHUB_WORKSPACE/ndk/toolchains/aarch64-linux-android-4.9/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+          echo "$GITHUB_WORKSPACE/ndk/toolchains/arm-linux-androideabi-4.9/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
           clang/bin/clang --version
-          ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android-ld.bfd --version
+          $GITHUB_WORKSPACE/ndk/toolchains/aarch64-linux-android-4.9/prebuilt/linux-x86_64/bin/aarch64-linux-android-ld.bfd --version
 
       - name: Clean Output Directory
         run: rm -rf out dtb.img Image.gz-dtb AnyKernel3 *.zip log.txt || true
 
       - name: Make Defconfig
         run: |
-          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin:$GITHUB_WORKSPACE/ndk/toolchains/aarch64-linux-android-4.9/prebuilt/linux-x86_64/bin:$GITHUB_WORKSPACE/ndk/toolchains/arm-linux-androideabi-4.9/prebuilt/linux-x86_64/bin:$PATH"
           make O=out ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-android- \
             CROSS_COMPILE_ARM32=arm-linux-androideabi- \
@@ -93,18 +94,18 @@ jobs:
             HOSTCXX="clang++ --target=x86_64-linux-gnu" \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             HOSTLD=ld \
-            LD=$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android-ld.bfd \
+            LD=$GITHUB_WORKSPACE/ndk/toolchains/aarch64-linux-android-4.9/prebuilt/linux-x86_64/bin/aarch64-linux-android-ld.bfd \
             LLVM=1 LLVM_IAS=1 \
             AS=clang \
             ${{ github.event.inputs.defconfig }}
 
       - name: Compile Kernel
         run: |
-          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin:$GITHUB_WORKSPACE/ndk/toolchains/aarch64-linux-android-4.9/prebuilt/linux-x86_64/bin:$GITHUB_WORKSPACE/ndk/toolchains/arm-linux-androideabi-4.9/prebuilt/linux-x86_64/bin:$PATH"
           export CROSS_COMPILE=aarch64-linux-android-
           export CROSS_COMPILE_ARM32=arm-linux-androideabi-
           export CLANG_TRIPLE=aarch64-linux-gnu-
-          export LD=$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android-ld.bfd
+          export LD=$GITHUB_WORKSPACE/ndk/toolchains/aarch64-linux-android-4.9/prebuilt/linux-x86_64/bin/aarch64-linux-android-ld.bfd
           export AS=clang
           make -j$(nproc --all) O=out \
             ARCH=arm64 \
