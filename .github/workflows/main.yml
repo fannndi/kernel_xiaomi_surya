@@ -18,8 +18,7 @@ env:
   ARCH: arm64
   SUBARCH: arm64
   CLANG_URL: https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android13-release/clang-r450784d.tar.gz
-  GCC64_REPO: https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git
-  GCC32_REPO: https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git
+  NDK_URL: https://dl.google.com/android/repository/android-ndk-r22b-linux-x86_64.zip
 
 jobs:
   build:
@@ -39,53 +38,59 @@ jobs:
           echo "BUILD_ID=$BUILD_ID" >> $GITHUB_ENV
           echo "ZIPNAME=$ZIPNAME" >> $GITHUB_ENV
           echo "BUILD_START=$(date +%s)" >> $GITHUB_ENV
+
       - name: Create Swap
         run: |
           sudo fallocate -l 3G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
+
       - name: Install Dependencies
         run: |
           sudo apt update
           sudo apt install -y --no-install-recommends \
-            clang llvm gcc-9 g++-9 \
+            gcc-9 g++-9 \
             abootimg bc binutils bison build-essential \
             cpio curl device-tree-compiler flex git kmod \
             libelf-dev libfdt-dev liblz4-tool libncurses5-dev \
             libssl-dev lz4 lzop make openssl patchutils pigz \
             rsync unzip wget xz-utils zip zstd
+
       - name: Download Toolchains
         run: |
           mkdir -p clang
           wget -q $CLANG_URL -O - | tar -xz -C clang
-          git clone --depth=1 -b lineage-19.1 $GCC64_REPO gcc64
-          git clone --depth=1 -b lineage-19.1 $GCC32_REPO gcc32
+          wget -q $NDK_URL -O ndk.zip
+          unzip -q ndk.zip
+          mv android-ndk-r22b ndk
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
-          echo "$GITHUB_WORKSPACE/gcc64/bin" >> $GITHUB_PATH
-          echo "$GITHUB_WORKSPACE/gcc32/bin" >> $GITHUB_PATH
+          echo "$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
           clang/bin/clang --version
+          ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android-ld.bfd --version
+
       - name: Clean Output Directory
         run: rm -rf out dtb.img Image.gz-dtb AnyKernel3 *.zip log.txt || true
 
       - name: Make Defconfig
         run: |
-          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH"
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
           make O=out ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-android- \
             CROSS_COMPILE_ARM32=arm-linux-androideabi- \
             CC=clang HOSTCC=clang HOSTCXX=clang++ \
             CLANG_TRIPLE=aarch64-linux-gnu- \
-            LD=$GITHUB_WORKSPACE/gcc64/bin/aarch64-linux-android-ld.bfd \
+            LD=$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android-ld.bfd \
             LLVM=1 LLVM_IAS=1 \
             ${{ github.event.inputs.defconfig }}
+
       - name: Compile Kernel
         run: |
-          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH"
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
           export CROSS_COMPILE=aarch64-linux-android-
           export CROSS_COMPILE_ARM32=arm-linux-androideabi-
           export CLANG_TRIPLE=aarch64-linux-gnu-
-          export LD=$GITHUB_WORKSPACE/gcc64/bin/aarch64-linux-android-ld.bfd
+          export LD=$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android-ld.bfd
           JOBS=$(nproc --all)
           export MAKEFLAGS="-j$(( JOBS > 2 ? JOBS-1 : 2 )) -Oline"
           make O=out \
@@ -95,11 +100,13 @@ jobs:
             LLVM=1 LLVM_IAS=1 \
             Image.gz-dtb 2>&1 | tee log.txt
           [ ${PIPESTATUS[0]} -eq 0 ] || { tail -n 50 log.txt; exit 1; }
+
       - name: Package with AnyKernel3
         run: |
           git clone --depth=1 https://github.com/rinnsakaguchi/AnyKernel3 -b FSociety
           cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
           cd AnyKernel3 && zip -r9 ../${{ env.ZIPNAME }} . -x '*.git*' README.md *placeholder
+
       - name: Upload Artifacts
         if: always()
         uses: actions/upload-artifact@v4
