@@ -81,7 +81,7 @@ jobs:
           clang/bin/ld.lld --version || true
 
       - name: Clean Output Directory
-        run: rm -rf out dtb.img Image.gz-dtb AnyKernel3 *.zip log.txt || true
+        run: rm -rf out dtb.img dtbo.img Image.gz-dtb AnyKernel3 *.zip log.txt || true
 
       - name: Make Defconfig
         run: |
@@ -109,13 +109,27 @@ jobs:
             CC=clang \
             HOSTCC=clang HOSTCXX=clang++ \
             LLVM=1 LLVM_IAS=1 \
-            Image.gz-dtb 2>&1 | tee log.txt
+            Image.gz-dtb dtbo.img 2>&1 | tee log.txt
           [ ${PIPESTATUS[0]} -eq 0 ] || { tail -n 50 log.txt; exit 1; }
+
+      - name: Build DTB Image
+        run: |
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+          cat out/arch/arm64/boot/dts/**/*.dtb > out/dtb.img
+          ls -lh out/dtb.img
+
+      - name: Build DTBO Image
+        run: |
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+          python3 tools/makedtboimg.py create out/dtbo.img out/arch/arm64/boot/dts/*.dtbo
+          ls -lh out/dtbo.img
 
       - name: Package with AnyKernel3
         run: |
           git clone --depth=1 https://github.com/rinnsakaguchi/AnyKernel3 -b FSociety
           cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
+          cp out/dtb.img AnyKernel3/
+          cp out/dtbo.img AnyKernel3/
           cd AnyKernel3 && zip -r9 ../${{ env.ZIPNAME }} . -x '*.git*' README.md *placeholder
 
       - name: Upload Artifacts
@@ -126,6 +140,8 @@ jobs:
           path: |
             log.txt
             out/.config
+            out/dtb.img
+            out/dtbo.img
             ${{ env.ZIPNAME }}
           if-no-files-found: warn
 
