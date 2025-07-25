@@ -1,4 +1,4 @@
-name: Kernel Build (A10 - NDK)
+name: Kernel Build (A10 - Hybrid GCC+NDK)
 
 on:
   workflow_dispatch:
@@ -18,18 +18,20 @@ env:
   ARCH: arm64
   SUBARCH: arm64
   CLANG_URL: https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android11-release/clang-r383902.tar.gz
-  NDK_VERSION: r27c
+  GCC64_REPO: https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git
+  GCC32_REPO: https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git
+  NDK_URL: https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip
 
 jobs:
   build:
-    name: Compile Kernel (A10)
+    name: Compile Kernel (Hybrid)
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Kernel Source
         uses: actions/checkout@v3
 
-      - name: Set Vars
+      - name: Set Build Variables
         run: |
           BUILD_TIME=$(date '+%d%m%Y-%H%M')
           BUILD_ID=$(date '+%Y%m%d%H%M%S')
@@ -39,7 +41,7 @@ jobs:
           echo "ZIPNAME=$ZIPNAME" >> $GITHUB_ENV
           echo "BUILD_START=$(date +%s)" >> $GITHUB_ENV
 
-      - name: Create Swap
+      - name: Create Swap (3G)
         run: |
           sudo fallocate -l 3G /swapfile
           sudo chmod 600 /swapfile
@@ -57,30 +59,37 @@ jobs:
             libssl-dev lz4 lzop make openssl patchutils pigz \
             rsync unzip wget xz-utils zip zstd
 
-      - name: Download Toolchains (Clang + NDK)
+      - name: Download Toolchains (Clang + GCC + NDK)
         run: |
-          # Clang
+          # Clang (A10)
           mkdir -p clang
           wget -q $CLANG_URL -O - | tar -xz -C clang
 
-          # Android NDK
-          wget https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip
-          unzip -q android-ndk-${NDK_VERSION}-linux.zip
-          mv android-ndk-${NDK_VERSION} ndk
+          # GCC 4.9 (64-bit & 32-bit)
+          git clone --depth=1 -b lineage-17.1 $GCC64_REPO gcc64
+          git clone --depth=1 -b lineage-17.1 $GCC32_REPO gcc32
 
-          # Export Paths
+          # NDK r21e (modern binutils)
+          wget $NDK_URL -O ndk.zip
+          unzip -q ndk.zip
+          mv android-ndk-r21e ndk
+
+          # PATH
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
+          echo "$GITHUB_WORKSPACE/gcc64/bin" >> $GITHUB_PATH
+          echo "$GITHUB_WORKSPACE/gcc32/bin" >> $GITHUB_PATH
           echo "$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
 
           clang/bin/clang --version
-          ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android-gcc --version
+          gcc64/bin/aarch64-linux-android-gcc --version
+          ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android-ld.bfd --version || true
 
       - name: Clean Output Directory
         run: rm -rf out dtb.img Image.gz-dtb AnyKernel3 *.zip log.txt || true
 
       - name: Make Defconfig
         run: |
-          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
           make O=out ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-android- \
             CROSS_COMPILE_ARM32=arm-linux-androideabi- \
@@ -92,7 +101,7 @@ jobs:
 
       - name: Compile Kernel
         run: |
-          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$GITHUB_WORKSPACE/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
           export CROSS_COMPILE=aarch64-linux-android-
           export CROSS_COMPILE_ARM32=arm-linux-androideabi-
           export CLANG_TRIPLE=aarch64-linux-gnu-
