@@ -38,7 +38,7 @@ BUILD_HOST="gitpod"
 ARCH="arm64"
 SUBARCH="arm64"
 CACHE_DIR="$HOME/.cache/kernel_build"
-CLANG_DIR="$CACHE_DIR/clang"
+CLANG_DIR="$CACHE_DIR/clang-${CLANG_VER}"
 
 GCC64_REPO="https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git"
 GCC32_REPO="https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git"
@@ -51,6 +51,7 @@ BUILD_START=$(date +%s)
 
 # ===================== LOGGING =====================
 LOGFILE="log.txt"
+rm -f "$LOGFILE"   # hapus log lama
 exec > >(tee -a "$LOGFILE") 2>&1
 trap 'echo "[ERROR] Build failed. Check log.txt for full details."' ERR
 
@@ -73,36 +74,29 @@ set_clang_url() {
 
 download_clang() {
     echo "==> Downloading Clang ($CLANG_VER)..."
-    rm -rf "$CLANG_DIR"
     mkdir -p "$CLANG_DIR"
-
     local clang_tar="$CACHE_DIR/clang-${CLANG_VER}.tar.gz"
-    wget --show-progress -O "$clang_tar" "$CLANG_URL"
 
-    if [[ ! -s "$clang_tar" ]]; then
-        echo "[ERROR] Clang download failed: $CLANG_URL"
-        exit 1
+    if [[ ! -f "$clang_tar" ]]; then
+        wget --show-progress -O "$clang_tar" "$CLANG_URL"
     fi
 
+    rm -rf "$CLANG_DIR"/*
     tar -xf "$clang_tar" -C "$CLANG_DIR"
     echo "$CLANG_VER" > "$CLANG_DIR/clang.version"
-    rm -f "$clang_tar"
 }
 
 prepare_clang() {
     local version_file="$CLANG_DIR/clang.version"
-    if [[ -f "$version_file" ]]; then
+    if [[ -d "$CLANG_DIR" && -f "$version_file" ]]; then
         local current_version
         current_version=$(cat "$version_file")
-        if [[ "$current_version" != "$CLANG_VER" ]]; then
-            echo "==> Clang version mismatch ($current_version -> $CLANG_VER). Redownloading..."
-            download_clang
-        else
+        if [[ "$current_version" == "$CLANG_VER" ]]; then
             echo "==> Using cached Clang ($current_version)"
+            return
         fi
-    else
-        download_clang
     fi
+    download_clang
 }
 
 prepare_toolchains() {
@@ -176,6 +170,7 @@ compile_kernel() {
         CC=clang \
         HOSTCC=clang HOSTCXX=clang++ \
         LLVM=1 LLVM_IAS=1 \
+        CFLAGS_KERNEL="-Wno-unused-but-set-variable -Wno-unused-variable -Wno-uninitialized" \
         Image.gz-dtb
 }
 
@@ -187,6 +182,7 @@ build_dtb_dtbo() {
 
 package_anykernel() {
     echo "==> Packaging AnyKernel3..."
+    rm -rf AnyKernel3
     git clone --depth=1 https://github.com/rinnsakaguchi/AnyKernel3 -b FSociety
     cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
     cp out/dtb.img AnyKernel3/
