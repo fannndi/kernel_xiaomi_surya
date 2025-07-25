@@ -1183,7 +1183,7 @@ bool lim_send_assoc_ind_to_sme(tpAniSirGlobal mac_ctx,
 			       uint8_t sub_type,
 			       tpSirMacMgmtHdr hdr,
 			       tpSirAssocReq assoc_req,
-				   enum ani_akm_type akm_type,
+			       enum ani_akm_type akm_type,
 			       bool pmf_connection,
 			       bool *assoc_req_copied,
 			       bool dup_entry);

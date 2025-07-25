@@ -359,6 +359,7 @@ typedef struct tagCsrScanResultFilter {
 	bool realm_check;
 	uint8_t fils_realm[2];
 	bool force_rsne_override;
+	qdf_time_t age_threshold;
 } tCsrScanResultFilter;
 
 typedef struct sCsrChnPower_ {
@@ -771,6 +772,7 @@ typedef struct tagPmkidCacheInfo {
 	uint8_t ssid_len;
 	uint8_t ssid[SIR_MAC_MAX_SSID_LENGTH];
 	uint8_t cache_id[CACHE_ID_LEN];
+	tCsrMobilityDomainInfo MDID;
 } tPmkidCacheInfo;
 
 #ifdef FEATURE_WLAN_WAPI
@@ -1259,6 +1261,9 @@ typedef struct tagCsrConfigParam {
 	int8_t roam_bg_scan_bad_rssi_thresh;
 	uint8_t roam_bad_rssi_thresh_offset_2g;
 	uint32_t roam_bg_scan_client_bitmap;
+	uint32_t roam_data_rssi_threshold_triggers;
+	int32_t roam_data_rssi_threshold;
+	uint32_t rx_data_inactivity_time;
 	uint32_t obss_width_interval;
 	uint32_t obss_active_dwelltime;
 	uint32_t obss_passive_dwelltime;
@@ -1797,6 +1802,9 @@ typedef QDF_STATUS (*csr_session_close_cb)(uint8_t session_id);
 #define CSR_IS_FW_FT_FILS_SUPPORTED(fw_akm_bitmap) \
 	(((fw_akm_bitmap) & (1 << AKM_FT_FILS))  ? true : false)
 
+#define CSR_IS_FW_SUITEB_ROAM_SUPPORTED(fw_akm_bitmap) \
+	(((fw_akm_bitmap) & (1 << AKM_SUITEB))  ? true : false)
+
 QDF_STATUS csr_set_channels(tpAniSirGlobal pMac, tCsrConfigParam *pParam);
 
 /* enum to string conversion for debug output */
@@ -1814,6 +1822,7 @@ typedef void (*tCsrTsmStatsCallback)(tAniTrafStrmMetrics tsmMetrics,
 #endif /* FEATURE_WLAN_ESE */
 typedef void (*tCsrSnrCallback)(int8_t snr, uint32_t staId, void *pContext);
 
+void csr_assoc_rej_free_rssi_disallow_list(struct sAniSirGlobal *mac);
 /**
  * csr_roam_issue_ft_preauth_req() - Initiate Preauthentication request
  * @max_ctx: Global MAC context

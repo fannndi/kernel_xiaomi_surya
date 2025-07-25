@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2020, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -150,7 +150,7 @@ struct gsi_chan_ctx {
 	struct completion compl;
 	bool allocated;
 	atomic_t poll_mode;
-	union __packed gsi_channel_scratch scratch;
+	union gsi_channel_scratch scratch;
 	struct gsi_chan_stats stats;
 	bool enable_dp_stats;
 	bool print_dp_stats;
@@ -169,7 +169,7 @@ struct gsi_evt_ctx {
 	struct completion compl;
 	struct gsi_chan_ctx *chan;
 	atomic_t chan_ref_cnt;
-	union __packed gsi_evt_scratch scratch;
+	union gsi_evt_scratch scratch;
 	struct gsi_evt_stats stats;
 };
 
@@ -234,6 +234,8 @@ struct gsi_ctx {
 	u32 intcntrlr_mem_size;
 	irq_handler_t intcntrlr_gsi_isr;
 	irq_handler_t intcntrlr_client_isr;
+
+	atomic_t num_unclock_irq;
 };
 
 enum gsi_re_type {

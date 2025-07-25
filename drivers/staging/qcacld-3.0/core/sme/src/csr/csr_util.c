@@ -3442,7 +3442,6 @@ bool csr_is_pmkid_found_for_peer(tpAniSirGlobal mac,
 	return false;
 }
 
-
 /**
  * csr_get_rsn_information() - to get RSN information
  * @mac_ctx: pointer to global MAC context

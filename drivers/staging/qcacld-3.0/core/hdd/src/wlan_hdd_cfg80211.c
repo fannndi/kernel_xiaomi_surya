@@ -360,15 +360,15 @@ static const u32 hdd_sta_akm_suites[] = {
 	WLAN_AKM_SUITE_TDLS,
 	WLAN_AKM_SUITE_SAE,
 	WLAN_AKM_SUITE_FT_OVER_SAE,
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0))
-	WLAN_AKM_SUITE_8021X_SUITE_B,
-	WLAN_AKM_SUITE_8021X_SUITE_B_192,
-#endif
+	WLAN_AKM_SUITE_EAP_SHA256,
+	WLAN_AKM_SUITE_EAP_SHA384,
 	WLAN_AKM_SUITE_FILS_SHA256,
 	WLAN_AKM_SUITE_FILS_SHA384,
 	WLAN_AKM_SUITE_FT_FILS_SHA256,
 	WLAN_AKM_SUITE_FT_FILS_SHA384,
 	WLAN_AKM_SUITE_OWE,
+	WLAN_AKM_SUITE_DPP_RSN,
+	WLAN_AKM_SUITE_FT_EAP_SHA_384,
 };
 
 /*akm suits supported by AP*/
@@ -2495,7 +2495,7 @@ static int __wlan_hdd_cfg80211_do_acs(struct wiphy *wiphy,
 	struct hdd_context *hdd_ctx = wiphy_priv(wiphy);
 	tsap_config_t *sap_config;
 	struct sk_buff *temp_skbuff;
-	int ret, i, ch_cnt = 0;
+	int ret, i;
 	struct nlattr *tb[QCA_WLAN_VENDOR_ATTR_ACS_MAX + 1];
 	bool ht_enabled, ht40_enabled, vht_enabled;
 	uint8_t ch_width;
@@ -2503,7 +2503,6 @@ static int __wlan_hdd_cfg80211_do_acs(struct wiphy *wiphy,
 	QDF_STATUS qdf_status;
 	uint8_t conc_channel;
 	mac_handle_t mac_handle;
-	bool skip_etsi13_srd_chan = false;
 
 	/* ***Note*** Donot set SME config related to ACS operation here because
 	 * ACS operation is not synchronouse and ACS for Second AP may come when
@@ -2686,23 +2685,6 @@ static int __wlan_hdd_cfg80211_do_acs(struct wiphy *wiphy,
 		hdd_err("acs config chan count 0");
 		ret = -EINVAL;
 		goto out;
-	}
-
-	skip_etsi13_srd_chan =
-		!hdd_ctx->config->etsi13_srd_chan_in_master_mode &&
-		wlan_reg_is_etsi13_regdmn(hdd_ctx->pdev);
-
-	if (skip_etsi13_srd_chan) {
-		for (i = 0; i < sap_config->acs_cfg.ch_list_count; i++) {
-			if (wlan_reg_is_etsi13_srd_chan(hdd_ctx->pdev,
-							sap_config->acs_cfg.
-							ch_list[i]))
-				sap_config->acs_cfg.ch_list[i] = 0;
-			else
-				sap_config->acs_cfg.ch_list[ch_cnt++] =
-						sap_config->acs_cfg.ch_list[i];
-		}
-		sap_config->acs_cfg.ch_list_count = ch_cnt;
 	}
 
 	/* consult policy manager to get PCL */
@@ -3025,7 +3007,7 @@ void wlan_hdd_cfg80211_acs_ch_select_evt(struct hdd_adapter *adapter)
 		INIT_DELAYED_WORK(&con_sap_adapter->acs_pending_work,
 				      wlan_hdd_cfg80211_start_pending_acs);
 		/* Lets give 1500ms for OBSS + START_BSS to complete */
-		schedule_delayed_work(&con_sap_adapter->acs_pending_work,
+		queue_delayed_work(system_power_efficient_wq, &con_sap_adapter->acs_pending_work,
 					msecs_to_jiffies(1500));
 	}
 }
@@ -7759,6 +7741,28 @@ static int hdd_config_disconnect_ies(struct hdd_adapter *adapter,
 	return qdf_status_to_os_return(status);
 }
 
+#if defined(CLD_PM_QOS) && defined(WLAN_FEATURE_LL_MODE)
+void wlan_hdd_set_wlm_mode(struct hdd_context *hdd_ctx, uint16_t latency_level)
+{
+	if (latency_level ==
+	    QCA_WLAN_VENDOR_ATTR_CONFIG_LATENCY_LEVEL_ULTRALOW) {
+		hdd_ctx->llm_enabled = true;
+		if (!hdd_ctx->hbw_requested) {
+			pm_qos_update_request(&hdd_ctx->pm_qos_req,
+					      DISABLE_KRAIT_IDLE_PS_VAL);
+			hdd_ctx->hbw_requested = true;
+		}
+	} else {
+		if (hdd_ctx->hbw_requested) {
+			pm_qos_update_request(&hdd_ctx->pm_qos_req,
+					      PM_QOS_DEFAULT_VALUE);
+			hdd_ctx->hbw_requested = false;
+		}
+		hdd_ctx->llm_enabled = false;
+	}
+}
+#endif
+
 /**
  * __wlan_hdd_cfg80211_wifi_configuration_set() - Wifi configuration
  * vendor command
@@ -8315,6 +8319,8 @@ __wlan_hdd_cfg80211_wifi_configuration_set(struct wiphy *wiphy,
 			hdd_err("Invalid Wlan latency level value");
 			return -EINVAL;
 		}
+
+		wlan_hdd_set_wlm_mode(hdd_ctx, latency_level);
 
 		/* Mapping the latency value to the level which fw expected
 		 * 0 - normal, 1 - moderate, 2 - low, 3 - ultralow
@@ -12846,6 +12852,8 @@ static void hdd_sar_safety_timer_cb(void *user_data)
 
 void wlan_hdd_sar_unsolicited_timer_start(struct hdd_context *hdd_ctx)
 {
+	QDF_STATUS status;
+
 	if (!hdd_ctx->config->enable_sar_safety)
 		return;
 
@@ -12855,14 +12863,20 @@ void wlan_hdd_sar_unsolicited_timer_start(struct hdd_context *hdd_ctx)
 
 	if (QDF_TIMER_STATE_RUNNING !=
 		qdf_mc_timer_get_current_state(
-				&hdd_ctx->sar_safety_unsolicited_timer))
-		qdf_mc_timer_start(
+				&hdd_ctx->sar_safety_unsolicited_timer)) {
+		status = qdf_mc_timer_start(
 			&hdd_ctx->sar_safety_unsolicited_timer,
 			hdd_ctx->config->sar_safety_unsolicited_timeout);
+
+		if (QDF_IS_STATUS_SUCCESS(status))
+			hdd_nofl_debug("sar unsolicited timer started");
+	}
 }
 
 void wlan_hdd_sar_timers_reset(struct hdd_context *hdd_ctx)
 {
+	QDF_STATUS status;
+
 	if (!hdd_ctx->config->enable_sar_safety)
 		return;
 
@@ -12870,16 +12884,26 @@ void wlan_hdd_sar_timers_reset(struct hdd_context *hdd_ctx)
 		return;
 
 	if (QDF_TIMER_STATE_RUNNING ==
-		qdf_mc_timer_get_current_state(&hdd_ctx->sar_safety_timer))
-		qdf_mc_timer_stop(&hdd_ctx->sar_safety_timer);
+		qdf_mc_timer_get_current_state(&hdd_ctx->sar_safety_timer)) {
+		status =  qdf_mc_timer_stop(&hdd_ctx->sar_safety_timer);
+		if (QDF_IS_STATUS_SUCCESS(status))
+			hdd_nofl_debug("sar safety timer stopped");
+		}
 
-	qdf_mc_timer_start(&hdd_ctx->sar_safety_timer,
-			   hdd_ctx->config->sar_safety_timeout);
+	status = qdf_mc_timer_start(
+			&hdd_ctx->sar_safety_timer,
+			hdd_ctx->config->sar_safety_timeout);
+	if (QDF_IS_STATUS_SUCCESS(status))
+		hdd_nofl_debug("sar safety timer started");
 
 	if (QDF_TIMER_STATE_RUNNING ==
 		qdf_mc_timer_get_current_state(
-				&hdd_ctx->sar_safety_unsolicited_timer))
-		qdf_mc_timer_stop(&hdd_ctx->sar_safety_unsolicited_timer);
+				&hdd_ctx->sar_safety_unsolicited_timer)) {
+		status = qdf_mc_timer_stop(
+				&hdd_ctx->sar_safety_unsolicited_timer);
+		if (QDF_IS_STATUS_SUCCESS(status))
+			hdd_nofl_debug("sar unsolicited timer stopped");
+	}
 
 	qdf_event_set(&hdd_ctx->sar_safety_req_resp_event);
 }
@@ -12888,6 +12912,8 @@ void wlan_hdd_sar_timers_init(struct hdd_context *hdd_ctx)
 {
 	if (!hdd_ctx->config->enable_sar_safety)
 		return;
+
+	hdd_enter();
 
 	qdf_mc_timer_init(&hdd_ctx->sar_safety_timer, QDF_TIMER_TYPE_SW,
 			  hdd_sar_safety_timer_cb, hdd_ctx);
@@ -12899,12 +12925,15 @@ void wlan_hdd_sar_timers_init(struct hdd_context *hdd_ctx)
 	qdf_atomic_init(&hdd_ctx->sar_safety_req_resp_event_in_progress);
 	qdf_event_create(&hdd_ctx->sar_safety_req_resp_event);
 
+	hdd_exit();
 }
 
 void wlan_hdd_sar_timers_deinit(struct hdd_context *hdd_ctx)
 {
 	if (!hdd_ctx->config->enable_sar_safety)
 		return;
+
+	hdd_enter();
 
 	if (QDF_TIMER_STATE_RUNNING ==
 		qdf_mc_timer_get_current_state(&hdd_ctx->sar_safety_timer))
@@ -12920,6 +12949,8 @@ void wlan_hdd_sar_timers_deinit(struct hdd_context *hdd_ctx)
 	qdf_mc_timer_destroy(&hdd_ctx->sar_safety_unsolicited_timer);
 
 	qdf_event_destroy(&hdd_ctx->sar_safety_req_resp_event);
+
+	hdd_exit();
 }
 #endif
 
@@ -21553,7 +21584,7 @@ static int __wlan_hdd_cfg80211_connect(struct wiphy *wiphy,
 	 * Check if this is reassoc to same bssid, if reassoc is success, return
 	 */
 	status = wlan_hdd_reassoc_bssid_hint(adapter, req);
-	if (!status)
+	if (!status || status == -EPERM)
 		return status;
 
 	/* Try disconnecting if already in connected state */
@@ -21815,6 +21846,12 @@ wlan_hdd_get_cfg80211_disconnect_reason(struct hdd_adapter *adapter,
 	if (reason >= eSIR_MAC_REASON_PROP_START) {
 		adapter->last_disconnect_reason =
 			wlan_hdd_sir_mac_to_qca_reason(reason);
+		/*
+		 * Applications expect reason code as 0 for beacon miss failure
+		 * due to backward compatibility. So send ieee80211_reason as 0.
+		 */
+		if (reason == eSIR_MAC_BEACON_MISSED)
+			ieee80211_reason = 0;
 	} else {
 		ieee80211_reason = (enum ieee80211_reasoncode)reason;
 		adapter->last_disconnect_reason =
@@ -24707,6 +24744,7 @@ wlan_hdd_extauth_copy_pmkid(struct cfg80211_external_auth_params *params,
 
 /**
  * __wlan_hdd_cfg80211_external_auth() - Handle external auth
+ *
  * @wiphy: Pointer to wireless phy
  * @dev: net device
  * @params: Pointer to external auth params.

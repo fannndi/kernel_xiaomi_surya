@@ -463,5 +463,6 @@ void lim_handle_sap_beacon(struct wlan_objmgr_pdev *pdev,
  * Return: AKM type
  */
 enum ani_akm_type lim_translate_rsn_oui_to_akm_type(uint8_t auth_suite[4]);
+
 /************************************************************/
 #endif /* __LIM_API_H */

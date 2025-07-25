@@ -66,6 +66,7 @@ static void lim_process_normal_hdd_msg(tpAniSirGlobal mac_ctx,
 	struct scheduler_msg *msg, uint8_t rsp_reqd);
 
 #ifdef WLAN_FEATURE_SAE
+
 /**
  * lim_process_sae_msg_sta() - Process SAE message for STA
  * @mac: Global MAC pointer
@@ -165,7 +166,7 @@ static void lim_process_sae_msg_ap(tpAniSirGlobal mac,
 					      assoc_req->sub_type,
 					      &assoc_req->hdr,
 					      assoc_req->assoc_req,
-						  ANI_AKM_TYPE_SAE,
+					      ANI_AKM_TYPE_SAE,
 					      assoc_req->pmf_connection,
 					      &assoc_req_copied,
 					      assoc_req->dup_entry) == false)
@@ -1837,6 +1838,7 @@ static void lim_process_messages(tpAniSirGlobal mac_ctx,
 	case eWNI_SME_ROAM_INVOKE:
 		/* fall through */
 	case eWNI_SME_ROAM_SCAN_OFFLOAD_REQ:
+	case eWNI_SME_ROAM_SEND_PER_REQ:
 	case eWNI_SME_SET_ADDBA_ACCEPT:
 	case eWNI_SME_UPDATE_EDCA_PROFILE:
 	case WNI_SME_REGISTER_BCN_REPORT_SEND_CB:
